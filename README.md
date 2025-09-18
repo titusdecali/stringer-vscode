@@ -65,20 +65,6 @@ From there, you can trigger the `Align Translations` command to align any other 
 - Offers a quick, non‑blocking prompt to align other locale files (only when targets exist)
 - Provides a status bar button to open a small Stringer menu (align, website, docs, billing)
 
-## How it finds your i18n folder
-
-The extension reads your Stringer CLI project configuration from `~/.stringer-cli.json`. It tries to
-match the current workspace by:
-1) `projectName` (package.json name)
-2) `projectPath` (exact path match)
-3) Nested path prefix (handles subfolders or multi‑root workspaces)
-
-From that config it uses:
-- `outputDir` (default `i18n/locales`)
-- `baseLanguage` (default `en`)
-
-Your base language file is expected at: `<workspace>/${outputDir}/${baseLanguage}.json`.
-
 ## Usage
 
 1) Ensure you’ve run the Stringer CLI at least once in your project folder, including running the stringer `convert` flow.

@@ -3,7 +3,15 @@
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
   "version": "1.0.0",
-  "publisher": "Stringer CLI",
+  "publisher": "titusdecali",
+  "icon": "images/stringerIcon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/titusdecali/stringer-vscode"
+  },
+  "bugs": {
+    "url": "https://discord.gg/hSfeCkej4y"
+  },
   "engines": {
     "vscode": "^1.80.0"
   },
