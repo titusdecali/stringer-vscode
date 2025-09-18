@@ -1,4 +1,6 @@
-# Stringer i18n Helper (VS Code Extension)
+<div align="center" style="font-weight: bold; margin-top: 10px; margin-bottom: 10px; font-size: 2em;">
+Stringer i18n Helper (VS Code Extension)
+</div>
 
 <div align="center" style="font-weight: bold; margin-top: 10px; margin-bottom: 10px;">
 This extension is a companion to the Stringer CLI.
