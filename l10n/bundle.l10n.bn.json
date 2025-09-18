@@ -1,0 +1,10 @@
+{
+  "terminal.align.name": "Stringer অ্যালাইন",
+  "msg.select.string": "Stringer দিয়ে i18n কী যোগ করতে একটি টেক্সট নির্বাচন করুন।",
+  "error.no.workspace": "কোনো ওয়ার্কস্পেস ফোল্ডার পাওয়া যায়নি।",
+  "error.no.config": "Stringer CLI কনফিগারেশন পাওয়া যায়নি। এই প্রজেক্টে একবার Stringer CLI চালান।",
+  "error.keypath": "ফাইল অবস্থান থেকে কী পথ নির্ণয় করা যাচ্ছে না।",
+  "dialog.align.question": "আপনার অনুবাদগুলো অসমাঞ্জস্য। অনুপস্থিত অনুবাদ যোগ করতে \"{0}\" চালাবেন?",
+  "common.yes": "হ্যাঁ",
+  "common.no": "না"
+}

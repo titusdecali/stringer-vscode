@@ -1,0 +1,10 @@
+{
+  "terminal.align.name": "Stringer Выравнивание",
+  "msg.select.string": "Выберите текст, чтобы добавить i18n‑ключ через Stringer.",
+  "error.no.workspace": "Папка рабочей области не найдена.",
+  "error.no.config": "Конфигурация Stringer CLI не найдена. Запустите Stringer CLI один раз в этом проекте.",
+  "error.keypath": "Невозможно получить путь ключа из расположения файла.",
+  "dialog.align.question": "Ваши переводы не выровнены. Запустить \"{0}\", чтобы добавить отсутствующие переводы?",
+  "common.yes": "Да",
+  "common.no": "Нет"
+}

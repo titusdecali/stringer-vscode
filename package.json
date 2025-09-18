@@ -1,0 +1,52 @@
+{
+  "name": "stringer-helper",
+  "displayName": "%extension.displayName%",
+  "description": "%extension.description%",
+  "version": "1.0.0",
+  "publisher": "Stringer CLI",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:stringer.addI18nKey",
+    "onCommand:stringer.showMenu"
+  ],
+  "main": "./dist/start.js",
+  "l10n": {
+    "bundle": "./l10n/bundle.l10n.json"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "stringer.addI18nKey",
+        "title": "%command.stringer.addI18nKey.title%"
+      },
+      {
+        "command": "stringer.showMenu",
+        "title": "Stringer: Open Menu"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "stringer.addI18nKey",
+          "group": "navigation@9",
+          "when": "editorHasSelection && resourceExtname =~ /(js|jsx|ts|tsx|vue|svelte|mdx|md)/"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "build": "pnpm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.4.5"
+  }
+}

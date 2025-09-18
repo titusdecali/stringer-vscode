@@ -1,0 +1,5 @@
+{
+  "extension.displayName": "Stringer i18n 助手",
+  "extension.description": "透過 Stringer 從選取文字新增 i18n 金鑰，並對齊翻譯。",
+  "command.stringer.addI18nKey.title": "🌎 透過 Stringer 新增 i18n 金鑰"
+}

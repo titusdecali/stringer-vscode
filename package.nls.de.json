@@ -1,0 +1,5 @@
+{
+  "extension.displayName": "Stringer i18n‑Helfer",
+  "extension.description": "Fügen Sie i18n‑Schlüssel mit Stringer aus markiertem Text hinzu und richten Sie Übersetzungen aus.",
+  "command.stringer.addI18nKey.title": "🌎 i18n‑Schlüssel mit Stringer hinzufügen"
+}

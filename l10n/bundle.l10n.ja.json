@@ -1,0 +1,10 @@
+{
+  "terminal.align.name": "Stringer アライン",
+  "msg.select.string": "Stringer で i18n キーを追加するためにテキストを選択してください。",
+  "error.no.workspace": "ワークスペースのフォルダーが見つかりません。",
+  "error.no.config": "Stringer CLI の設定が見つかりません。このプロジェクトで一度 Stringer CLI を実行してください。",
+  "error.keypath": "ファイルの場所からキーのパスを導出できません。",
+  "dialog.align.question": "翻訳が整合していません。欠落している翻訳を追加するために \"{0}\" を実行しますか？",
+  "common.yes": "はい",
+  "common.no": "いいえ"
+}

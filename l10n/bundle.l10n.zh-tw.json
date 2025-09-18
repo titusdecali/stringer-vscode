@@ -1,0 +1,10 @@
+{
+  "terminal.align.name": "Stringer 對齊",
+  "msg.select.string": "選取文字以透過 Stringer 新增 i18n 鍵。",
+  "error.no.workspace": "找不到工作區資料夾。",
+  "error.no.config": "找不到 Stringer CLI 設定。請在此專案中執行一次 Stringer CLI。",
+  "error.keypath": "無法依據檔案位置推導鍵路徑。",
+  "dialog.align.question": "您的翻譯未對齊。是否執行 \"{0}\" 來新增缺少的翻譯？",
+  "common.yes": "是",
+  "common.no": "否"
+}

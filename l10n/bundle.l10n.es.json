@@ -1,0 +1,10 @@
+{
+  "terminal.align.name": "Stringer Alinear",
+  "msg.select.string": "Seleccione un texto para agregar una clave i18n con Stringer.",
+  "error.no.workspace": "No se encontró ninguna carpeta de espacio de trabajo.",
+  "error.no.config": "No se encontró la configuración de Stringer CLI. Ejecute Stringer CLI una vez en este proyecto.",
+  "error.keypath": "No se puede derivar la ruta de clave desde la ubicación del archivo.",
+  "dialog.align.question": "Sus traducciones no están alineadas. ¿Ejecutar \"{0}\" para agregar traducciones faltantes?",
+  "common.yes": "Sí",
+  "common.no": "No"
+}

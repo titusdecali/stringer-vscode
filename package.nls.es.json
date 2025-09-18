@@ -1,0 +1,5 @@
+{
+  "extension.displayName": "Asistente de i18n de Stringer",
+  "extension.description": "Agregue claves i18n con Stringer desde texto seleccionado y alinee traducciones.",
+  "command.stringer.addI18nKey.title": "🌎 Agregar clave i18n con Stringer"
+}

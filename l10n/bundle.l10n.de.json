@@ -1,0 +1,10 @@
+{
+  "terminal.align.name": "Stringer Ausrichten",
+  "msg.select.string": "Wählen Sie einen Text, um mit Stringer einen i18n-Schlüssel hinzuzufügen.",
+  "error.no.workspace": "Kein Arbeitsbereichsordner gefunden.",
+  "error.no.config": "Stringer-CLI-Konfiguration nicht gefunden. Führen Sie die Stringer CLI einmal in diesem Projekt aus.",
+  "error.keypath": "Schlüsselpfad kann nicht aus dem Dateispeicherort abgeleitet werden.",
+  "dialog.align.question": "Ihre Übersetzungen sind nicht ausgerichtet. \"{0}\" ausführen, um fehlende Übersetzungen hinzuzufügen?",
+  "common.yes": "Ja",
+  "common.no": "Nein"
+}

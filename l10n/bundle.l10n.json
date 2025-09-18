@@ -1,0 +1,10 @@
+{
+  "terminal.align.name": "Stringer Align",
+  "msg.select.string": "Select a string to add i18n key via Stringer.",
+  "error.no.workspace": "No workspace folder found.",
+  "error.no.config": "Stringer CLI config not found. Run the Stringer CLI once in this project.",
+  "error.keypath": "Cannot derive key path from file location.",
+  "dialog.align.question": "Your translations are out of alignment. Run \"{0}\" to add missing translations?",
+  "common.yes": "Yes",
+  "common.no": "No"
+}

@@ -1,0 +1,10 @@
+{
+  "terminal.align.name": "Stringer 对齐",
+  "msg.select.string": "选择一段文本以通过 Stringer 添加 i18n 键。",
+  "error.no.workspace": "未找到工作区文件夹。",
+  "error.no.config": "未找到 Stringer CLI 配置。请在此项目中运行一次 Stringer CLI。",
+  "error.keypath": "无法根据文件位置推导键路径。",
+  "dialog.align.question": "您的翻译未对齐。是否运行 \"{0}\" 以添加缺失的翻译？",
+  "common.yes": "是",
+  "common.no": "否"
+}

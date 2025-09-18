@@ -1,0 +1,10 @@
+{
+  "terminal.align.name": "Stringer संरेखण",
+  "msg.select.string": "Stringer के माध्यम से i18n कुंजी जोड़ने के लिए कोई पाठ चुनें।",
+  "error.no.workspace": "कार्यस्थान फ़ोल्डर नहीं मिला।",
+  "error.no.config": "Stringer CLI कॉन्फ़िगरेशन नहीं मिला। कृपया इस प्रोजेक्ट में एक बार Stringer CLI चलाएँ।",
+  "error.keypath": "फ़ाइल स्थान से कुंजी पथ प्राप्त नहीं किया जा सका।",
+  "dialog.align.question": "आपके अनुवाद असंगत हैं। क्या गायब अनुवाद जोड़ने के लिए \"{0}\" चलाना है?",
+  "common.yes": "हाँ",
+  "common.no": "नहीं"
+}

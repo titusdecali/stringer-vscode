@@ -1,0 +1,5 @@
+{
+  "extension.displayName": "مساعد Stringer للترجمة الدولية",
+  "extension.description": "أضف مفاتيح i18n عبر Stringer من النص المحدد وقم بمحاذاة الترجمات.",
+  "command.stringer.addI18nKey.title": "إضافة مفتاح i18n عبر Stringer 🌎"
+}

@@ -1,0 +1,10 @@
+{
+  "terminal.align.name": "Stringer 정렬",
+  "msg.select.string": "Stringer로 i18n 키를 추가할 문자열을 선택하세요.",
+  "error.no.workspace": "워크스페이스 폴더를 찾을 수 없습니다.",
+  "error.no.config": "Stringer CLI 설정을 찾을 수 없습니다. 이 프로젝트에서 Stringer CLI를 한 번 실행하세요.",
+  "error.keypath": "파일 위치에서 키 경로를 유도할 수 없습니다.",
+  "dialog.align.question": "번역이 정렬되어 있지 않습니다. 누락된 번역을 추가하려면 \"{0}\"를 실행하시겠습니까?",
+  "common.yes": "예",
+  "common.no": "아니오"
+}

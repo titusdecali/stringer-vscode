@@ -1,0 +1,5 @@
+{
+  "extension.displayName": "Stringer i18n ヘルパー",
+  "extension.description": "選択したテキストから Stringer で i18n キーを追加し、翻訳を整合します。",
+  "command.stringer.addI18nKey.title": "🌎 Stringer で i18n キーを追加"
+}

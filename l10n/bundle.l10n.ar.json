@@ -1,0 +1,10 @@
+{
+  "terminal.align.name": "Stringer محاذاة",
+  "msg.select.string": "حدد نصًا لإضافة مفتاح i18n عبر Stringer.",
+  "error.no.workspace": "لم يتم العثور على مجلد مساحة العمل.",
+  "error.no.config": "لم يتم العثور على إعداد Stringer CLI. شغّل Stringer CLI مرة واحدة في هذا المشروع.",
+  "error.keypath": "لا يمكن اشتقاق مسار المفتاح من موقع الملف.",
+  "dialog.align.question": "ترجماتك غير متسقة. هل تريد تشغيل \"{0}\" لإضافة الترجمات المفقودة؟",
+  "common.yes": "نعم",
+  "common.no": "لا"
+}

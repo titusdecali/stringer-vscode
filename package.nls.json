@@ -1,0 +1,5 @@
+{
+  "extension.displayName": "Stringer i18n Helper",
+  "extension.description": "Add i18n keys via Stringer from selected text and align translations.",
+  "command.stringer.addI18nKey.title": "🌎 Add i18n key via Stringer"
+}
