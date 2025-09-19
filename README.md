@@ -67,6 +67,8 @@ From there, you can trigger the `Align Translations` command to align any other 
 - Shows inline translation previews for `t('key.path')` calls using your project locales
 - Hover over a `t('key.path')` call to see the original i18n key and current value
 - Change the active preview language from the status bar or command palette
+- Multiple inline preview modes: Key + locale preview, or Locale-only preview that overlays the translated value
+- Highlights missing keys in the active preview language (in Vue templates) with a red inline indicator so you can fix alignment fast
 
 ## Usage
 
@@ -86,6 +88,18 @@ From there, you can trigger the `Align Translations` command to align any other 
 - It displays an inline preview of the resolved translation after each `t('key.path')` call.
 - Hover on a `t('...')` call to see the original key and the current language value.
 
+### Preview modes
+
+- <b>Key + locale preview</b>: Shows the full key plus the translated value next to the call.
+- <b>Locale-only preview</b>: Hides the original `t('...')` code visually and overlays just the translated value inline for a clean reading view.
+- <b>Off</b>: No inline preview decorations are shown.
+
+You can switch modes from:
+
+- Status bar: click the “Preview” eye → select a mode.
+- Command palette: run `Stringer: Change Preview Mode`.
+- Control Panel: run `Stringer: Open Control Panel` and change the mode there.
+
 ### Change preview language
 
 - Click the “Lang” globe in the status bar → select a locale; or
@@ -93,10 +107,24 @@ From there, you can trigger the `Align Translations` command to align any other 
 
 By default, the preview language is your configured `baseLanguage`. You can set a persistent default in settings.
 
+### Missing key highlighting
+
+- When the active preview language is missing a key that is used inside Vue template text, the inline preview shows a red indicator with “Locale Key Missing!!”.
+- This is a strong signal that your target locales are out of sync with the base language.
+- Fix it by running alignment: click the status bar “Stringer” button → pick “Align Translations”, or run `stringer align` in your terminal.
+
+### Control Panel
+
+- Open with `Stringer: Open Control Panel`.
+- Change preview mode and preview language, reload locales, and open quick links for the website, docs, and billing.
+
 ### Settings
 
 - `stringerHelper.enableInlinePreview` (boolean, default `true`): toggle inline previews on/off.
 - `stringerHelper.defaultPreviewLanguage` (string, default empty): set a preferred preview language code. If empty, falls back to `baseLanguage` from your CLI config.
+- `stringerHelper.inlinePreviewKeyMode` (string, default `hidden`): choose the preview content. Supported values: `full` (key + text), `hidden` (text only).
+- `stringerHelper.hoverShowsKey` (boolean, default `true`): show the i18n key in hover tooltips.
+- `stringerHelper.autoAlignAfterAdd` (boolean, default `false`): when adding a new key via the command, automatically trigger `stringer align` if other locale files exist.
 
 Notes:
 - Make sure you’ve run any Stringer CLI flow at least once so `~/.stringer-cli.json` exists and your project is registered.
