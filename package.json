@@ -2,7 +2,7 @@
   "name": "stringer-helper",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "publisher": "titusdecali",
   "icon": "images/stringerIcon.png",
   "repository": {
@@ -17,6 +17,16 @@
   },
   "categories": [
     "Other"
+  ],
+  "keywords": [
+    "i18n",
+    "localization",
+    "translation",
+    "vue",
+    "nuxt",
+    "react",
+    "nextjs",
+    "next"
   ],
   "activationEvents": [
     "onLanguage:vue",
