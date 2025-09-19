@@ -4,6 +4,28 @@ import * as path from 'path'
 import os from 'os'
 
 let isProcessingCommand = false
+let activePreviewLanguage: string | null = null
+let projectContext: {
+  projectRoot: string
+  localesDir: string
+  baseLanguage: string
+} | null = null
+let localeCache: Record<string, any> = {}
+let localeWatcher: vscode.FileSystemWatcher | null = null
+let cliConfigWatcher: fs.FSWatcher | null = null
+const decorationType = vscode.window.createTextEditorDecorationType({
+  after: {
+    margin: '0 0 0 0.6em',
+    color: new vscode.ThemeColor('editorCodeLens.foreground') as any
+  },
+  rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed
+})
+const hiddenTextDecorationType = vscode.window.createTextEditorDecorationType({
+  // Hide original text when rendering locale-only mode and collapse width
+  textDecoration: 'none; opacity: 0; font-size: 0; letter-spacing: 0;'
+})
+// Separate decoration type for rendering values with 'before' so it is not affected by hidden style
+const valueBeforeDecorationType = vscode.window.createTextEditorDecorationType({})
 
 // Utilities to mirror CLI behavior
 function readAllCliConfigs(): any[] | null {
@@ -347,6 +369,563 @@ function findEnclosingStringLiteralBounds(
 }
 
 export async function activate(context: vscode.ExtensionContext) {
+  async function ensureProjectContext(editor?: vscode.TextEditor | null): Promise<boolean> {
+    const ed = editor ?? vscode.window.activeTextEditor
+    if (!ed) return false
+    const workspaceFolders = vscode.workspace.workspaceFolders
+    const folder = vscode.workspace.getWorkspaceFolder(ed.document.uri) || (workspaceFolders && workspaceFolders[0])
+    if (!folder) return false
+    const projectRoot = folder.uri.fsPath
+    const config = await loadCliProjectConfig(projectRoot)
+    if (!config) return false
+    const outputDirConfigured: string = config.outputDir || path.join('i18n', 'locales')
+    const localesDir = path.resolve(projectRoot, outputDirConfigured)
+    const baseLanguage: string = config.baseLanguage || 'en'
+    projectContext = { projectRoot, localesDir, baseLanguage }
+
+    // Initialize preview language from settings or base language
+    const extConfig = vscode.workspace.getConfiguration('stringerHelper')
+    const preferred = extConfig.get<string>('defaultPreviewLanguage')
+    // Derive available languages from actual filenames in localesDir
+    let available: string[] = []
+    try {
+      available = fs
+        .readdirSync(localesDir)
+        .filter((f) => f.endsWith('.json'))
+        .map((f) => f.replace(/\.json$/, ''))
+    } catch {}
+    // Choose active language strictly from available filenames
+    if (preferred && available.includes(preferred)) activePreviewLanguage = preferred
+    else if (available.includes(baseLanguage)) activePreviewLanguage = baseLanguage
+    else activePreviewLanguage = available[0] || baseLanguage
+
+    // Setup locale watcher
+    if (localeWatcher) {
+      localeWatcher.dispose()
+      localeWatcher = null
+    }
+    try {
+      const pattern = new vscode.RelativePattern(localesDir, '*.json')
+      localeWatcher = vscode.workspace.createFileSystemWatcher(pattern)
+      const reload = async () => {
+        localeCache = {}
+        await preloadLocales()
+        refreshActiveEditorDecorations()
+      }
+      localeWatcher.onDidChange(reload)
+      localeWatcher.onDidCreate(reload)
+      localeWatcher.onDidDelete(reload)
+      context.subscriptions.push(localeWatcher)
+    } catch {}
+
+    await preloadLocales()
+
+    // Watch CLI config for changes so we can refresh projectContext if user runs the CLI again
+    try {
+      const configPath = path.join(os.homedir(), '.stringer-cli.json')
+      if (cliConfigWatcher) {
+        try { cliConfigWatcher.close() } catch {}
+        cliConfigWatcher = null
+      }
+      if (fs.existsSync(configPath)) {
+        cliConfigWatcher = fs.watch(configPath, { persistent: false }, async () => {
+          await ensureProjectContext(vscode.window.activeTextEditor)
+          refreshActiveEditorDecorations()
+        })
+      }
+    } catch {}
+    return true
+  }
+
+  function getValueByPath(obj: any, keyPath: string): any {
+    if (!obj) return undefined
+    const parts = keyPath.split('.').filter(Boolean)
+    let node = obj
+    for (const part of parts) {
+      if (node && typeof node === 'object' && part in node) node = node[part]
+      else return undefined
+    }
+    return typeof node === 'string' ? node : undefined
+  }
+  // Support numeric-leaf patterns where the key may be the leaf id (e.g., 4-digit code)
+  function getValueByPathLoose(obj: any, keyPath: string): any {
+    if (!obj) return undefined
+    const parts = keyPath.split('.').filter(Boolean)
+    let node = obj
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      if (node && typeof node === 'object' && part in node) {
+        node = node[part]
+        continue
+      }
+      // If this is the last part and the parent is an object with a single 4-digit key, return that
+      const isLast = i === parts.length - 1
+      if (isLast && node && typeof node === 'object') {
+        const leafKeys = Object.keys(node)
+        const four = leafKeys.find((k) => /^\d{4}$/.test(k) && typeof node[k] === 'string')
+        if (four) return node[four]
+      }
+      return undefined
+    }
+    return typeof node === 'string' ? node : undefined
+  }
+
+  async function loadLocale(lang: string): Promise<Record<string, any> | null> {
+    if (!projectContext) return null
+    if (localeCache[lang]) return localeCache[lang]
+    const tryPaths = (() => {
+      const variants = new Set<string>()
+      const L = (lang || '').trim()
+      const low = L.toLowerCase()
+      const dash = low.replace(/_/g, '-')
+      variants.add(L)
+      variants.add(low)
+      variants.add(dash)
+      if (dash.includes('-')) variants.add(dash.split('-')[0])
+      return Array.from(variants).map((v) => path.join(projectContext!.localesDir, `${v}.json`))
+    })()
+    try {
+      for (const fp of tryPaths) {
+        try {
+          const txt = await fs.promises.readFile(fp, 'utf-8')
+          const json = JSON.parse(txt)
+          localeCache[lang] = json
+          return json
+        } catch {}
+      }
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  async function preloadLocales(): Promise<void> {
+    if (!projectContext) return
+    await loadLocale(projectContext.baseLanguage)
+    if (activePreviewLanguage && activePreviewLanguage !== projectContext.baseLanguage) {
+      await loadLocale(activePreviewLanguage)
+    }
+  }
+
+  function getTranslation(keyPath: string): string | null {
+    if (!projectContext) return null
+    const lang = activePreviewLanguage || projectContext.baseLanguage
+    // Try direct match
+    const primary = getValueByPath(localeCache[lang], keyPath)
+    if (primary) return primary
+    // Try loose match (handles numeric leaf keys)
+    const loose = getValueByPathLoose(localeCache[lang], keyPath)
+    if (loose) return loose
+    // Fallback to base language
+    const fallbackBase = getValueByPath(localeCache[projectContext.baseLanguage], keyPath)
+    if (fallbackBase) return fallbackBase
+    const fallbackLoose = getValueByPathLoose(localeCache[projectContext.baseLanguage], keyPath)
+    if (fallbackLoose) return fallbackLoose
+    // Last-resort: try any loaded locale (helps if baseLanguage file is missing)
+    for (const k of Object.keys(localeCache)) {
+      const v = getValueByPath(localeCache[k], keyPath) || getValueByPathLoose(localeCache[k], keyPath)
+      if (typeof v === 'string') return v
+    }
+    return null
+  }
+
+  function findTTupleRanges(doc: vscode.TextDocument): Array<{ range: vscode.Range; key: string }> {
+    const text = doc.getText()
+    const results: Array<{ range: vscode.Range; key: string }> = []
+    // Best-effort regex for t('...') calls; supports nested dot keys and dashes/underscores
+    const rx = /\bt\(\s*['"]([A-Za-z0-9_.-]+)['"]\s*\)/g
+    for (let m: RegExpExecArray | null = rx.exec(text); m; m = rx.exec(text)) {
+      const key = m[1]
+      const start = m.index
+      const end = m.index + m[0].length
+      const range = new vscode.Range(doc.positionAt(start), doc.positionAt(end))
+      results.push({ range, key })
+    }
+    return results
+  }
+
+  function decorateEditor(editor: vscode.TextEditor) {
+    const cfg = vscode.workspace.getConfiguration('stringerHelper')
+    const enable = cfg.get<boolean>('enableInlinePreview', true)
+    const keyMode = (cfg.get<string>('inlinePreviewKeyMode') || 'hidden') as 'hidden' | 'full' | 'leaf'
+    const hoverShowsKey = cfg.get<boolean>('hoverShowsKey', true)
+    if (!enable) {
+      editor.setDecorations(decorationType, [])
+      return
+    }
+    const found = findTTupleRanges(editor.document)
+    const decorations: vscode.DecorationOptions[] = []
+    const hiddenRanges: vscode.DecorationOptions[] = []
+    const hiddenModeValueDecorations: vscode.DecorationOptions[] = []
+    const docText = editor.document.getText()
+    const isVue = isVueFile(editor.document.uri.fsPath)
+    for (const item of found) {
+      const value = getTranslation(item.key)
+      const textToShow = value ?? ''
+      const startOffset = editor.document.offsetAt(item.range.start)
+      const inVueTemplate = isVue && isVueTemplateTextNode(docText, startOffset)
+      // Missing is determined against the ACTIVE locale file only (no fallback),
+      // so removing a key from the active file turns it red immediately.
+      const lang = (activePreviewLanguage || projectContext?.baseLanguage) as string
+      const activeDirect = projectContext ? getValueByPath(localeCache[lang], item.key) : undefined
+      const isMissing = !activeDirect && inVueTemplate
+      if (!textToShow && cfg.get<string>('inlinePreviewKeyMode') !== 'hidden') continue
+      const hover = new vscode.MarkdownString()
+      if (hoverShowsKey) hover.appendMarkdown(`Key: \`${item.key}\``)
+      hover.appendMarkdown('\n\n')
+      hover.appendMarkdown(`Value (${activePreviewLanguage}): ${value}`)
+      const leaf = item.key.split('.').pop() || item.key
+      // Key+locale mode should not duplicate the key (code already shows it)
+      // Leaf mode shows a compact key prefix; Hidden mode shows only value and hides the code
+      const keyLabel = keyMode === 'leaf' ? `[${leaf}] ` : ''
+      if (keyMode === 'hidden') {
+        // 1) Hide the original text entirely (collapsed width)
+        hiddenRanges.push({ range: item.range })
+        // 2) Render the value via a separate decoration so opacity does not affect it
+        hiddenModeValueDecorations.push({
+          range: item.range,
+          // Avoid duplicate hover (decoration + provider); provider will handle it
+          renderOptions: {
+            after: {
+              contentText: ` ${isMissing ? 'Locale Key Missing!!' : textToShow} `,
+              backgroundColor: (isMissing ? 'hsl(0, 70%, 50%)' : 'hsl(270, 55%, 43%)') as any,
+              color: '#ffffff' as any,
+              margin: '0 0 0 0',
+              border: '1px solid',
+              borderColor: (isMissing ? 'hsl(0, 70%, 50%)' : 'hsl(270, 55%, 43%)') as any,
+              textDecoration: 'border-radius: 8px; padding: 0 6px;'
+            }
+          }
+        })
+      } else {
+        decorations.push({
+          range: item.range,
+          hoverMessage: hover,
+          renderOptions: {
+            after: {
+              contentText: ` ${keyLabel}${isMissing ? 'Locale Key Missing!!' : textToShow}`,
+              backgroundColor: (isMissing ? 'hsl(0, 70%, 50%)' : 'hsl(270, 55%, 43%)') as any,
+              color: '#ffffff' as any,
+              margin: '0 0 0 0',
+              border: '1px solid',
+              borderColor: (isMissing ? 'hsl(0, 70%, 50%)' : 'hsl(270, 55%, 43%)') as any,
+              textDecoration: 'border-radius: 8px; padding: 0 6px;'
+            }
+          }
+        })
+      }
+    }
+    // Apply decorations per mode
+    if (keyMode === 'hidden') {
+      editor.setDecorations(valueBeforeDecorationType, hiddenModeValueDecorations)
+      editor.setDecorations(hiddenTextDecorationType, hiddenRanges)
+      editor.setDecorations(decorationType, [])
+    } else {
+      editor.setDecorations(decorationType, decorations)
+      editor.setDecorations(hiddenTextDecorationType, [])
+      editor.setDecorations(valueBeforeDecorationType, [])
+    }
+  }
+
+  function refreshActiveEditorDecorations() {
+    const ed = vscode.window.activeTextEditor
+    if (!ed) return
+    decorateEditor(ed)
+  }
+
+  // Provide hover in any file type
+  const hoverProvider = vscode.languages.registerHoverProvider({ scheme: 'file' }, {
+    provideHover(document, position) {
+      const ranges = findTTupleRanges(document)
+      for (const r of ranges) {
+        if (r.range.contains(position)) {
+          const value = getTranslation(r.key)
+          const md = new vscode.MarkdownString()
+          md.appendMarkdown(`Key: \`${r.key}\``)
+          if (value) md.appendMarkdown(`\n\nValue (${activePreviewLanguage}): ${value}`)
+          return new vscode.Hover(md, r.range)
+        }
+      }
+      return undefined
+    }
+  })
+  context.subscriptions.push(hoverProvider)
+
+  async function getAvailableLocales(): Promise<string[]> {
+    if (!projectContext) return []
+    try {
+      return fs
+        .readdirSync(projectContext.localesDir)
+        .filter((f) => f.endsWith('.json'))
+        .map((f) => f.replace(/\.json$/, ''))
+    } catch {
+      return []
+    }
+  }
+
+  async function choosePreviewLanguage(): Promise<void> {
+    if (!projectContext) {
+      const ok = await ensureProjectContext(null)
+      if (!ok) {
+        vscode.window.showErrorMessage(vscode.l10n.t('Stringer CLI config not found. Run the Stringer CLI once in this project.'))
+        return
+      }
+    }
+    if (!projectContext) return
+    const items = await getAvailableLocales()
+    if (items.length === 0) {
+      vscode.window.showInformationMessage(vscode.l10n.t('No locale files found in {0}', projectContext.localesDir))
+      return
+    }
+    const pick = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Select preview language',
+      title: 'Stringer: Change Preview Language'
+    })
+    if (!pick) return
+    activePreviewLanguage = pick
+    const extConfig = vscode.workspace.getConfiguration('stringerHelper')
+    if (!extConfig.get('defaultPreviewLanguage')) {
+      await extConfig.update('defaultPreviewLanguage', pick, vscode.ConfigurationTarget.Global)
+    }
+    await preloadLocales()
+    langStatusItem.text = `$(globe) Lang: ${activePreviewLanguage}`
+    refreshActiveEditorDecorations()
+  }
+
+  const langStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99)
+  langStatusItem.text = '$(globe) Lang'
+  langStatusItem.tooltip = 'Change Stringer preview language'
+  langStatusItem.command = 'stringer.changePreviewLanguage'
+  langStatusItem.show()
+  context.subscriptions.push(langStatusItem)
+
+  function getPreviewModeLabel(): string {
+    const cfg = vscode.workspace.getConfiguration('stringerHelper')
+    const enable = cfg.get<boolean>('enableInlinePreview', true)
+    if (!enable) return 'Off'
+    const keyMode = (cfg.get<string>('inlinePreviewKeyMode') || 'hidden') as 'hidden' | 'full' | 'leaf'
+    return keyMode === 'full' ? 'Key+Text' : keyMode === 'leaf' ? 'Leaf+Text' : 'Text'
+  }
+
+  const previewStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 98)
+  previewStatusItem.text = `$(eye) Preview: ${getPreviewModeLabel()}`
+  previewStatusItem.tooltip = 'Change Stringer inline preview mode'
+  previewStatusItem.command = 'stringer.changePreviewMode'
+  previewStatusItem.show()
+  context.subscriptions.push(previewStatusItem)
+
+  const changeLangCmd = vscode.commands.registerCommand('stringer.changePreviewLanguage', async () => {
+    await choosePreviewLanguage()
+  })
+  context.subscriptions.push(changeLangCmd)
+
+  const togglePreviewCmd = vscode.commands.registerCommand('stringer.toggleInlinePreview', async () => {
+    const cfg = vscode.workspace.getConfiguration('stringerHelper')
+    const cur = cfg.get<boolean>('enableInlinePreview', true)
+    await cfg.update('enableInlinePreview', !cur, vscode.ConfigurationTarget.Global)
+    refreshActiveEditorDecorations()
+    previewStatusItem.text = `$(eye) Preview: ${getPreviewModeLabel()}`
+  })
+  context.subscriptions.push(togglePreviewCmd)
+
+  const changePreviewModeCmd = vscode.commands.registerCommand('stringer.changePreviewMode', async () => {
+    const cfg = vscode.workspace.getConfiguration('stringerHelper')
+    const enable = cfg.get<boolean>('enableInlinePreview', true)
+    const currentMode = (cfg.get<string>('inlinePreviewKeyMode') || 'hidden') as 'hidden' | 'full' | 'leaf'
+    const pick = await vscode.window.showQuickPick(
+      [
+        { label: 'No preview', description: 'Hide all inline translations', value: 'off' },
+        { label: 'Key + locale preview', description: 'Show full key and translation', value: 'full' },
+        { label: 'Locale only preview', description: 'Show translation only', value: 'hidden' }
+      ],
+      { title: 'Stringer: Change Preview Mode', placeHolder: 'Select inline preview mode' }
+    )
+    if (!pick) return
+    if (pick.value === 'off') {
+      await cfg.update('enableInlinePreview', false, vscode.ConfigurationTarget.Global)
+    } else {
+      if (!enable) await cfg.update('enableInlinePreview', true, vscode.ConfigurationTarget.Global)
+      await cfg.update('inlinePreviewKeyMode', pick.value, vscode.ConfigurationTarget.Global)
+    }
+    previewStatusItem.text = `$(eye) Preview: ${getPreviewModeLabel()}`
+    refreshActiveEditorDecorations()
+  })
+  context.subscriptions.push(changePreviewModeCmd)
+
+  const reloadLocalesCmd = vscode.commands.registerCommand('stringer.reloadLocales', async () => {
+    localeCache = {}
+    await ensureProjectContext(vscode.window.activeTextEditor)
+    await preloadLocales()
+    refreshActiveEditorDecorations()
+  })
+  context.subscriptions.push(reloadLocalesCmd)
+
+  const openControlPanelCmd = vscode.commands.registerCommand('stringer.openControlPanel', async () => {
+    const panel = vscode.window.createWebviewPanel(
+      'stringerControlPanel',
+      'Stringer',
+      vscode.ViewColumn.Active,
+      { enableScripts: true, retainContextWhenHidden: true }
+    )
+
+    const render = async () => {
+      const cfg = vscode.workspace.getConfiguration('stringerHelper')
+      const enable = cfg.get<boolean>('enableInlinePreview', true)
+      const keyMode = (cfg.get<string>('inlinePreviewKeyMode') || 'hidden')
+      const langs = await getAvailableLocales()
+      const currentLang = activePreviewLanguage || (projectContext?.baseLanguage ?? '')
+      const previewLabel = getPreviewModeLabel()
+      const langOptions = langs
+        .map((l) => `<option value="${l}" ${l === currentLang ? 'selected' : ''}>${l}</option>`) 
+        .join('')
+      const modeOptions = [
+        { v: 'off', l: 'No preview' },
+        { v: 'full', l: 'Key + locale preview' },
+        { v: 'hidden', l: 'Locale only preview' }
+      ].map(({ v, l }) => `<option value="${v}" ${((!enable && v==='off') || (enable && v===keyMode)) ? 'selected' : ''}>${l}</option>`).join('')
+
+      const website = 'https://stringer-cli.com'
+      const docs = 'https://docs.stringer-cli.com'
+      const billing = 'https://stringer-cli.com/billing'
+
+      panel.webview.html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${panel.webview.cspSource} https:; style-src ${panel.webview.cspSource} 'unsafe-inline'; script-src ${panel.webview.cspSource};" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: var(--vscode-font-family); color: var(--vscode-editor-foreground); padding: 16px; }
+    h2 { margin: 0 0 12px; }
+    .row { display: flex; gap: 12px; align-items: center; margin: 8px 0; }
+    select, button { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); padding: 4px 8px; }
+    .group { border: 1px solid var(--vscode-panel-border); padding: 12px; border-radius: 6px; margin-bottom: 12px; }
+    .links a { margin-right: 12px; }
+    .muted { opacity: 0.8; }
+  </style>
+  <title>Stringer</title>
+  </head>
+<body>
+  <h2>Stringer Control Panel</h2>
+  <div class="group">
+    <div class="row">
+      <label>Preview mode:</label>
+      <select id="mode">${modeOptions}</select>
+      <span class="muted">Current: ${previewLabel}</span>
+    </div>
+    <div class="row">
+      <label>Preview language:</label>
+      <select id="lang">${langOptions}</select>
+      <button id="reload">Reload locales</button>
+    </div>
+  </div>
+  <div class="group">
+    <div class="row">
+      <button id="align">Align Translations</button>
+    </div>
+  </div>
+  <div class="group links">
+    <a href="#" data-link="${website}">Website</a>
+    <a href="#" data-link="${docs}">Docs</a>
+    <a href="#" data-link="${billing}">Billing</a>
+  </div>
+  <script>
+    const vscode = acquireVsCodeApi()
+    const mode = document.getElementById('mode')
+    const lang = document.getElementById('lang')
+    const reload = document.getElementById('reload')
+    const align = document.getElementById('align')
+    mode.addEventListener('change', () => {
+      vscode.postMessage({ type: 'setMode', value: mode.value })
+    })
+    lang.addEventListener('change', () => {
+      vscode.postMessage({ type: 'setLanguage', value: lang.value })
+    })
+    reload.addEventListener('click', () => {
+      vscode.postMessage({ type: 'reloadLocales' })
+    })
+    align.addEventListener('click', () => {
+      vscode.postMessage({ type: 'align' })
+    })
+    document.querySelectorAll('[data-link]').forEach(a => {
+      a.addEventListener('click', (e) => { e.preventDefault(); vscode.postMessage({ type: 'open', value: a.getAttribute('data-link') }) })
+    })
+  </script>
+</body>
+</html>`
+    }
+
+    panel.webview.onDidReceiveMessage(async (msg) => {
+      if (msg.type === 'setMode') {
+        const cfg = vscode.workspace.getConfiguration('stringerHelper')
+        if (msg.value === 'off') {
+          await cfg.update('enableInlinePreview', false, vscode.ConfigurationTarget.Global)
+        } else {
+          await cfg.update('enableInlinePreview', true, vscode.ConfigurationTarget.Global)
+          await cfg.update('inlinePreviewKeyMode', msg.value, vscode.ConfigurationTarget.Global)
+        }
+        previewStatusItem.text = `$(eye) Preview: ${getPreviewModeLabel()}`
+        refreshActiveEditorDecorations()
+      }
+      if (msg.type === 'setLanguage') {
+        activePreviewLanguage = String(msg.value)
+        const extConfig = vscode.workspace.getConfiguration('stringerHelper')
+        if (!extConfig.get('defaultPreviewLanguage')) {
+          await extConfig.update('defaultPreviewLanguage', activePreviewLanguage, vscode.ConfigurationTarget.Global)
+        }
+        await preloadLocales()
+        langStatusItem.text = `$(globe) Lang: ${activePreviewLanguage}`
+        refreshActiveEditorDecorations()
+      }
+      if (msg.type === 'reloadLocales') {
+        localeCache = {}
+        await preloadLocales()
+        refreshActiveEditorDecorations()
+        await render()
+      }
+      if (msg.type === 'align') {
+        const workspaceFolders = vscode.workspace.workspaceFolders
+        const folder = vscode.window.activeTextEditor
+          ? vscode.workspace.getWorkspaceFolder(vscode.window.activeTextEditor.document.uri)
+          : (workspaceFolders && workspaceFolders[0])
+        if (folder) await runAlignInTerminal(folder.uri.fsPath)
+      }
+      if (msg.type === 'open') {
+        const url = String(msg.value)
+        vscode.env.openExternal(vscode.Uri.parse(url))
+      }
+    })
+
+    await render()
+  })
+  context.subscriptions.push(openControlPanelCmd)
+
+  vscode.workspace.onDidChangeTextDocument((e) => {
+    if (vscode.window.activeTextEditor && e.document === vscode.window.activeTextEditor.document) {
+      refreshActiveEditorDecorations()
+    }
+  })
+  vscode.window.onDidChangeActiveTextEditor(async (ed) => {
+    if (!ed) return
+    const ok = await ensureProjectContext(ed)
+    if (ok) {
+      langStatusItem.text = `$(globe) Lang: ${activePreviewLanguage}`
+      previewStatusItem.text = `$(eye) Preview: ${getPreviewModeLabel()}`
+      refreshActiveEditorDecorations()
+    }
+  })
+
+  vscode.workspace.onDidChangeConfiguration((e) => {
+    if (e.affectsConfiguration('stringerHelper')) {
+      refreshActiveEditorDecorations()
+    }
+  })
+
+  // Initialize for current editor if any
+  await ensureProjectContext(vscode.window.activeTextEditor)
+  langStatusItem.text = `$(globe) Lang: ${activePreviewLanguage ?? '—'}`
+  previewStatusItem.text = `$(eye) Preview: ${getPreviewModeLabel()}`
+  refreshActiveEditorDecorations()
   const disposable = vscode.commands.registerCommand('stringer.addI18nKey', async () => {
     if (isProcessingCommand) return
     isProcessingCommand = true
@@ -473,22 +1052,27 @@ export async function activate(context: vscode.ExtensionContext) {
       })()
 
       if (shouldShowAlign) {
-        const yes = vscode.l10n.t('Yes')
-        const no = vscode.l10n.t('No')
-        vscode.window
-          .showInformationMessage(
-            vscode.l10n.t(
-              'Your translations are out of alignment. Run "{0}" to add missing translations?',
-              'stringer align'
-            ),
-            yes,
-            no
-          )
-          .then(async (choice) => {
-            if (choice === yes) {
-              await runAlignInTerminal(projectRoot)
-            }
-          })
+        const autoAlign = vscode.workspace.getConfiguration('stringerHelper').get<boolean>('autoAlignAfterAdd', false)
+        if (autoAlign) {
+          await runAlignInTerminal(projectRoot)
+        } else {
+          const yes = vscode.l10n.t('Yes')
+          const no = vscode.l10n.t('No')
+          vscode.window
+            .showInformationMessage(
+              vscode.l10n.t(
+                'Your translations are out of alignment. Run "{0}" to add missing translations?',
+                'stringer align'
+              ),
+              yes,
+              no
+            )
+            .then(async (choice) => {
+              if (choice === yes) {
+                await runAlignInTerminal(projectRoot)
+              }
+            })
+        }
       }
     } finally {
       isProcessingCommand = false
@@ -512,6 +1096,8 @@ export async function activate(context: vscode.ExtensionContext) {
           description:
             'Add any missing translations for target languages based on your base language JSON file'
         },
+        { label: 'Change Preview Language', description: 'Switch inline preview locale' },
+        { label: 'Change Preview Mode', description: 'Switch inline preview content' },
         { label: 'Open Website', description: 'stringer-cli.com' },
         { label: 'Open Docs', description: 'docs.stringer-cli.com' },
         { label: 'Open Billing', description: 'stringer-cli.com/billing' }
@@ -534,6 +1120,15 @@ export async function activate(context: vscode.ExtensionContext) {
         return
       }
       await runAlignInTerminal(folder.uri.fsPath)
+      return
+    }
+
+    if (pick.label === 'Change Preview Language') {
+      await choosePreviewLanguage()
+      return
+    }
+    if (pick.label === 'Change Preview Mode') {
+      await vscode.commands.executeCommand('stringer.changePreviewMode')
       return
     }
 

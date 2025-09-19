@@ -2,7 +2,7 @@
   "name": "stringer-helper",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "titusdecali",
   "icon": "images/stringerIcon.png",
   "repository": {
@@ -19,8 +19,8 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:stringer.addI18nKey",
-    "onCommand:stringer.showMenu"
+    "onLanguage:vue",
+    "onStartupFinished"
   ],
   "main": "./dist/start.js",
   "l10n": {
@@ -35,6 +35,26 @@
       {
         "command": "stringer.showMenu",
         "title": "Stringer: Open Menu"
+      },
+      {
+        "command": "stringer.changePreviewLanguage",
+        "title": "Stringer: Change Preview Language"
+      },
+      {
+        "command": "stringer.toggleInlinePreview",
+        "title": "Stringer: Toggle Inline Translation Preview"
+      },
+      {
+        "command": "stringer.changePreviewMode",
+        "title": "Stringer: Change Preview Mode"
+      },
+      {
+        "command": "stringer.openControlPanel",
+        "title": "Stringer: Open Control Panel"
+      },
+      {
+        "command": "stringer.reloadLocales",
+        "title": "Stringer: Reload Locales"
       }
     ],
     "menus": {
@@ -42,9 +62,44 @@
         {
           "command": "stringer.addI18nKey",
           "group": "navigation@9",
-          "when": "editorHasSelection && resourceExtname =~ /(js|jsx|ts|tsx|vue|svelte|mdx|md)/"
+          "when": "editorHasSelection && resourceExtname =~ /\\.(js|jsx|ts|tsx|vue|svelte|mdx|md)$/"
         }
       ]
+    },
+    "configuration": {
+      "title": "Stringer Helper",
+      "properties": {
+        "stringerHelper.enableInlinePreview": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline translation preview for t('key') calls"
+        },
+        "stringerHelper.defaultPreviewLanguage": {
+          "type": "string",
+          "default": "",
+          "description": "Default preview language code (falls back to baseLanguage if empty)"
+        },
+        "stringerHelper.inlinePreviewKeyMode": {
+          "type": "string",
+          "enum": [
+            "hidden",
+            "full",
+            "leaf"
+          ],
+          "default": "hidden",
+          "markdownDescription": "Controls inline key display: `hidden` (no key), `full` (show full key), `leaf` (show 4-digit/leaf only)."
+        },
+        "stringerHelper.hoverShowsKey": {
+          "type": "boolean",
+          "default": true,
+          "description": "If enabled, hover includes the original i18n key."
+        },
+        "stringerHelper.autoAlignAfterAdd": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically run `stringer align` after adding a new i18n key to ensure other locales are updated."
+        }
+      }
     }
   },
   "scripts": {

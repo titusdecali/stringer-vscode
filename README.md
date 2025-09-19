@@ -64,6 +64,9 @@ From there, you can trigger the `Align Translations` command to align any other 
 - Detects context (Vue templates, attributes, script literals) and applies the right syntax
 - Offers a quick, non‑blocking prompt to align other locale files (only when targets exist)
 - Provides a status bar button to open a small Stringer menu (align, website, docs, billing)
+- Shows inline translation previews for `t('key.path')` calls using your project locales
+- Hover over a `t('key.path')` call to see the original i18n key and current value
+- Change the active preview language from the status bar or command palette
 
 ## Usage
 
@@ -75,6 +78,29 @@ From there, you can trigger the `Align Translations` command to align any other 
    - Replaces your selection with a context‑appropriate call (`t(...)`, `{{ t(...) }}`, or `:attr="t(...)"`)
    - Injects `const { t } = useI18n()` into .vue files if needed
    - Shows a non‑blocking align suggestion if other locale files exist
+
+### Inline translation preview
+
+- Open a `.vue` file that contains `t('...')` calls.
+- The extension reads your Stringer CLI config from `~/.stringer-cli.json` (matching your open workspace) to find `outputDir` and `baseLanguage`, then loads locale JSON files.
+- It displays an inline preview of the resolved translation after each `t('key.path')` call.
+- Hover on a `t('...')` call to see the original key and the current language value.
+
+### Change preview language
+
+- Click the “Lang” globe in the status bar → select a locale; or
+- Run command: `Stringer: Change Preview Language`.
+
+By default, the preview language is your configured `baseLanguage`. You can set a persistent default in settings.
+
+### Settings
+
+- `stringerHelper.enableInlinePreview` (boolean, default `true`): toggle inline previews on/off.
+- `stringerHelper.defaultPreviewLanguage` (string, default empty): set a preferred preview language code. If empty, falls back to `baseLanguage` from your CLI config.
+
+Notes:
+- Make sure you’ve run any Stringer CLI flow at least once so `~/.stringer-cli.json` exists and your project is registered.
+- Locale changes are watched live; edits to `<outputDir>/*.json` refresh previews automatically.
 
 ## Troubleshooting
 
