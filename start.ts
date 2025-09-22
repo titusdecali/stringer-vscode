@@ -28,10 +28,64 @@ const hiddenTextDecorationType = vscode.window.createTextEditorDecorationType({
 const valueBeforeDecorationType = vscode.window.createTextEditorDecorationType({})
 
 // Utilities to mirror CLI behavior
-function readAllCliConfigs(): any[] | null {
-  const configPath = path.join(os.homedir(), '.stringer-cli.json')
+function isWsl(): boolean {
   try {
-    if (!fs.existsSync(configPath)) return null
+    if (process.platform !== 'linux') return false
+    const release = fs.readFileSync('/proc/sys/kernel/osrelease', 'utf-8')
+    return /microsoft/i.test(release)
+  } catch {
+    return false
+  }
+}
+
+function findCliConfigPath(): string | null {
+  const candidates: string[] = []
+
+  // 1) Primary: same location as CLI uses
+  const home = os.homedir()
+  candidates.push(path.join(home, '.stringer-cli.json'))
+
+  // 2) Windows explicit USERPROFILE (sometimes differs from homedir in edge setups)
+  if (process.platform === 'win32') {
+    const userProfile = process.env.USERPROFILE
+    if (userProfile && userProfile !== home) {
+      candidates.push(path.join(userProfile, '.stringer-cli.json'))
+    }
+    // Common OneDrive profile redirect (rarely needed, harmless to check)
+    const oneDrive = process.env.OneDrive || process.env.ONEDRIVE
+    if (oneDrive) candidates.push(path.join(oneDrive, '..', '.stringer-cli.json'))
+  }
+
+  // 3) WSL: look for Windows home mirror under /mnt/c/Users/*
+  if (isWsl()) {
+    const base = '/mnt/c/Users'
+    try {
+      const users = fs.readdirSync(base)
+      for (const u of users) {
+        candidates.push(path.join(base, u, '.stringer-cli.json'))
+      }
+    } catch {}
+  }
+
+  // 4) Optional override via setting (user can provide an absolute path)
+  try {
+    const cfg = vscode.workspace.getConfiguration('stringerHelper')
+    const override = cfg.get<string>('cliConfigPath')
+    if (override && path.isAbsolute(override)) candidates.unshift(override)
+  } catch {}
+
+  for (const p of candidates) {
+    try {
+      if (p && fs.existsSync(p)) return p
+    } catch {}
+  }
+  return null
+}
+
+function readAllCliConfigs(): any[] | null {
+  const configPath = findCliConfigPath()
+  try {
+    if (!configPath) return null
     const content = fs.readFileSync(configPath, 'utf-8')
     const parsed = JSON.parse(content)
     return Array.isArray(parsed) ? parsed : [parsed]
@@ -275,6 +329,61 @@ function getAttributeContext(
   }
 }
 
+// ---------- Simple React/Next JSX helpers ----------
+function isJsxFile(filePath: string): boolean {
+  return /\.(jsx|tsx)$/i.test(filePath)
+}
+
+function isLikelyJsxUiContext(source: string, offset: number): boolean {
+  // Heuristic: inside a JSX element's content or attribute
+  const lastLt = source.lastIndexOf('<', offset)
+  const lastGt = source.lastIndexOf('>', offset)
+  const nextLt = source.indexOf('<', offset)
+  const nextGt = source.indexOf('>', offset)
+  if (lastLt === -1 || (nextGt === -1 && nextLt === -1)) return false
+  // Inside opening tag attributes
+  if (lastLt > lastGt) return true
+  // Between tags = text content
+  if (lastGt > lastLt && nextLt !== -1 && lastGt <= offset && offset <= nextLt) return true
+  return false
+}
+
+function getJsxAttributeContext(
+  source: string,
+  offset: number
+):
+  | {
+      name: string
+      nameStart: number
+      valueStartQuote: number
+      valueEndQuote: number
+    }
+  | null {
+  const tagStart = source.lastIndexOf('<', offset)
+  const tagEnd = source.indexOf('>', tagStart + 1)
+  if (tagStart === -1 || tagEnd === -1 || tagEnd < offset) return null
+  const slice = source.slice(tagStart + 1, tagEnd)
+  const rel = offset - (tagStart + 1)
+  const eqRel = slice.lastIndexOf('=', rel)
+  if (eqRel === -1) return null
+  const eqAbs = tagStart + 1 + eqRel
+  // Find attribute name
+  let nEnd = eqAbs - 1
+  while (nEnd > tagStart && /\s/.test(source[nEnd])) nEnd--
+  let nStart = nEnd
+  while (nStart > tagStart && /[A-Za-z0-9_:\-]/.test(source[nStart - 1])) nStart--
+  const rawName = source.slice(nStart, nEnd + 1)
+  // Find quoted value following '='
+  let qIdx = eqAbs + 1
+  while (qIdx < tagEnd && /\s/.test(source[qIdx])) qIdx++
+  const quote = source[qIdx]
+  if (quote !== '"' && quote !== "'") return null
+  const valueStartQuote = qIdx
+  const valueEndQuote = source.indexOf(quote, valueStartQuote + 1)
+  if (valueEndQuote === -1 || offset < valueStartQuote || offset > valueEndQuote) return null
+  return { name: rawName, nameStart: nStart, valueStartQuote, valueEndQuote }
+}
+
 // ---------- Ensure Vue t() availability ----------
 function hasUseI18nTDeclaration(block: string): boolean {
   return /const\s*\{\s*t\s*\}\s*=\s*useI18n\s*\(\s*\)/.test(block)
@@ -314,6 +423,82 @@ async function ensureVueTDeclaration(editor: vscode.TextEditor): Promise<void> {
   }
   const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(text.length))
   await withEdit(editor, (edit) => edit.replace(fullRange, updated))
+}
+
+// ---------- Ensure React/Next t() availability ----------
+function ensureImported(text: string, importLine: string): { updated: string; changed: boolean } {
+  if (new RegExp('^\\s*' + importLine.replace(/[.*+?^${}()|\\[\\]\\\\]/g, '\\$&'), 'm').test(text)) {
+    return { updated: text, changed: false }
+  }
+  // Insert after last import (or at top)
+  const rx = /^\s*import\b.*$/gm
+  let lastMatch: RegExpExecArray | null = null
+  for (let m = rx.exec(text); m; m = rx.exec(text)) lastMatch = m
+  if (lastMatch) {
+    const idx = (lastMatch.index || 0) + lastMatch[0].length
+    return { updated: text.slice(0, idx) + '\n' + importLine + text.slice(idx), changed: true }
+  }
+  return { updated: importLine + '\n' + text, changed: true }
+}
+
+async function ensureReactTDeclaration(editor: vscode.TextEditor, selectionOffset: number): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration('stringerHelper')
+  const style = cfg.get<string>('reactInjection', 'react-i18next')
+  if (style !== 'react-i18next') return
+  const doc = editor.document
+  const text = doc.getText()
+  // 1) Ensure import
+  const { updated: withImport, changed } = ensureImported(text, "import { useTranslation } from 'react-i18next'")
+  let working = withImport
+  // 2) Ensure const { t } = useTranslation() inside nearest function before selection
+  const fnIdx = (() => {
+    // Find nearest "function" or "=>" block start before selection
+    const before = working.slice(0, selectionOffset)
+    const lastFunc = Math.max(before.lastIndexOf('function '), before.lastIndexOf('=>'))
+    if (lastFunc === -1) return -1
+    const brace = working.indexOf('{', lastFunc)
+    return brace !== -1 ? brace + 1 : -1
+  })()
+  if (fnIdx !== -1) {
+    // Check if already declared in function block following fnIdx (first 300 chars)
+    const lookahead = working.slice(fnIdx, fnIdx + 300)
+    if (!/\bconst\s*\{\s*t\s*\}\s*=\s*useTranslation\s*\(\s*\)/.test(lookahead)) {
+      working = working.slice(0, fnIdx) + "\nconst { t } = useTranslation()\n" + working.slice(fnIdx)
+    }
+  }
+  if (changed || working !== text) {
+    const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(text.length))
+    await withEdit(editor, (edit) => edit.replace(fullRange, working))
+  }
+}
+
+async function ensureNextTDeclaration(editor: vscode.TextEditor, selectionOffset: number): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration('stringerHelper')
+  const style = cfg.get<string>('nextInjection', 'next-intl')
+  if (style !== 'next-intl') return
+  const doc = editor.document
+  const text = doc.getText()
+  // 1) Ensure import
+  const { updated: withImport, changed } = ensureImported(text, "import { useTranslations } from 'next-intl'")
+  let working = withImport
+  // 2) Ensure const t = useTranslations() inside nearest function before selection
+  const fnIdx = (() => {
+    const before = working.slice(0, selectionOffset)
+    const lastFunc = Math.max(before.lastIndexOf('function '), before.lastIndexOf('=>'))
+    if (lastFunc === -1) return -1
+    const brace = working.indexOf('{', lastFunc)
+    return brace !== -1 ? brace + 1 : -1
+  })()
+  if (fnIdx !== -1) {
+    const lookahead = working.slice(fnIdx, fnIdx + 300)
+    if (!/\bconst\s*t\s*=\s*useTranslations\s*\(\s*\)/.test(lookahead)) {
+      working = working.slice(0, fnIdx) + "\nconst t = useTranslations()\n" + working.slice(fnIdx)
+    }
+  }
+  if (changed || working !== text) {
+    const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(text.length))
+    await withEdit(editor, (edit) => edit.replace(fullRange, working))
+  }
 }
 
 function isEscaped(source: string, index: number): boolean {
@@ -377,11 +562,124 @@ export async function activate(context: vscode.ExtensionContext) {
     if (!folder) return false
     const projectRoot = folder.uri.fsPath
     const config = await loadCliProjectConfig(projectRoot)
-    if (!config) return false
-    const outputDirConfigured: string = config.outputDir || path.join('i18n', 'locales')
-    const localesDir = path.resolve(projectRoot, outputDirConfigured)
-    const baseLanguage: string = config.baseLanguage || 'en'
-    projectContext = { projectRoot, localesDir, baseLanguage }
+
+    // Determine localesDir/baseLanguage with fallbacks for missing CLI config
+    let localesDir: string | null = null
+    let baseLanguage: string = 'en'
+
+    if (config) {
+      const outputDirConfigured: string = config.outputDir || path.join('i18n', 'locales')
+      // Resolve relative to the CLI-configured projectPath when available (handles nested projects)
+      let effectiveRoot = projectRoot
+      try {
+        const cfgPath = (config as any).projectPath as string | undefined
+        if (cfgPath) effectiveRoot = path.isAbsolute(cfgPath) ? cfgPath : path.resolve(projectRoot, cfgPath)
+      } catch {}
+      localesDir = path.resolve(effectiveRoot, outputDirConfigured)
+      baseLanguage = config.baseLanguage || 'en'
+      // Use effective root for project context so other features compute paths correctly
+      projectContext = { projectRoot: effectiveRoot, localesDir, baseLanguage }
+      
+      // Initialize preview language from settings or base language
+      const extConfig = vscode.workspace.getConfiguration('stringerHelper')
+      const preferred = extConfig.get<string>('defaultPreviewLanguage')
+      // Derive available languages from actual filenames in localesDir
+      let available: string[] = []
+      try {
+        available = fs
+          .readdirSync(localesDir)
+          .filter((f) => f.endsWith('.json'))
+          .map((f) => f.replace(/\.json$/, ''))
+      } catch {}
+      // Choose active language strictly from available filenames
+      if (preferred && available.includes(preferred)) activePreviewLanguage = preferred
+      else if (available.includes(baseLanguage)) activePreviewLanguage = baseLanguage
+      else activePreviewLanguage = available[0] || baseLanguage
+
+      // Setup locale watcher
+      if (localeWatcher) {
+        localeWatcher.dispose()
+        localeWatcher = null
+      }
+      try {
+        const pattern = new vscode.RelativePattern(localesDir, '*.json')
+        localeWatcher = vscode.workspace.createFileSystemWatcher(pattern)
+        const reload = async () => {
+          localeCache = {}
+          await preloadLocales()
+          refreshActiveEditorDecorations()
+        }
+        localeWatcher.onDidChange(reload)
+        localeWatcher.onDidCreate(reload)
+        localeWatcher.onDidDelete(reload)
+        context.subscriptions.push(localeWatcher)
+      } catch {}
+
+      await preloadLocales()
+
+      // Watch CLI config for changes so we can refresh projectContext if user runs the CLI again
+      try {
+        const configPath = findCliConfigPath()
+        if (cliConfigWatcher) {
+          try { cliConfigWatcher.close() } catch {}
+          cliConfigWatcher = null
+        }
+        if (configPath && fs.existsSync(configPath)) {
+          cliConfigWatcher = fs.watch(configPath, { persistent: false }, async () => {
+            await ensureProjectContext(vscode.window.activeTextEditor)
+            refreshActiveEditorDecorations()
+          })
+        }
+      } catch {}
+      return true
+    } else {
+      // 1) Try previously saved selection for this workspace
+      const stateKey = `stringer.localesDir.${projectRoot}`
+      try {
+        const saved = context.workspaceState.get<string | undefined>(stateKey)
+        if (typeof saved === 'string' && saved && fs.existsSync(saved)) localesDir = saved
+      } catch {}
+
+      // 2) Search the workspace for any */locales/*.json
+      if (!localesDir) {
+        try {
+          const found = await vscode.workspace.findFiles(
+            new vscode.RelativePattern(folder, '**/locales/*.json'),
+            '**/node_modules/**',
+            50
+          )
+          if (found && found.length > 0) {
+            localesDir = path.dirname(found[0].fsPath)
+            try { await context.workspaceState.update(stateKey, localesDir) } catch {}
+          }
+        } catch {}
+      }
+
+      // 3) Prompt user to pick the locales folder
+      if (!localesDir) {
+        const pick = await vscode.window.showOpenDialog({
+          canSelectFolders: true,
+          canSelectFiles: false,
+          canSelectMany: false,
+          title: vscode.l10n.t('No locales folder found. Please select it manually if it exists.'),
+          defaultUri: folder.uri
+        })
+        if (!pick || pick.length === 0) {
+          return false
+        }
+        localesDir = pick[0].fsPath
+        try { await context.workspaceState.update(stateKey, localesDir) } catch {}
+      }
+
+      // Try to infer base language from files
+      try {
+        const files = fs.readdirSync(localesDir).filter((f) => f.endsWith('.json'))
+        if (files.includes('en.json')) baseLanguage = 'en'
+        else if (files.length > 0) baseLanguage = files[0].replace(/\.json$/, '')
+      } catch {}
+    }
+
+    projectContext = { projectRoot, localesDir: localesDir!, baseLanguage }
 
     // Initialize preview language from settings or base language
     const extConfig = vscode.workspace.getConfiguration('stringerHelper')
@@ -422,12 +720,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Watch CLI config for changes so we can refresh projectContext if user runs the CLI again
     try {
-      const configPath = path.join(os.homedir(), '.stringer-cli.json')
+      const configPath = findCliConfigPath()
       if (cliConfigWatcher) {
         try { cliConfigWatcher.close() } catch {}
         cliConfigWatcher = null
       }
-      if (fs.existsSync(configPath)) {
+      if (configPath && fs.existsSync(configPath)) {
         cliConfigWatcher = fs.watch(configPath, { persistent: false }, async () => {
           await ensureProjectContext(vscode.window.activeTextEditor)
           refreshActiveEditorDecorations()
@@ -558,17 +856,20 @@ export async function activate(context: vscode.ExtensionContext) {
     const hiddenRanges: vscode.DecorationOptions[] = []
     const hiddenModeValueDecorations: vscode.DecorationOptions[] = []
     const docText = editor.document.getText()
-    const isVue = isVueFile(editor.document.uri.fsPath)
+    const filePath = editor.document.uri.fsPath
+    const isVue = isVueFile(filePath)
+    const isJsx = isJsxFile(filePath)
     for (const item of found) {
       const value = getTranslation(item.key)
       const textToShow = value ?? ''
       const startOffset = editor.document.offsetAt(item.range.start)
       const inVueTemplate = isVue && isVueTemplateTextNode(docText, startOffset)
+      const inJsxUi = isJsx && isLikelyJsxUiContext(docText, startOffset)
       // Missing is determined against the ACTIVE locale file only (no fallback),
       // so removing a key from the active file turns it red immediately.
       const lang = (activePreviewLanguage || projectContext?.baseLanguage) as string
       const activeDirect = projectContext ? getValueByPath(localeCache[lang], item.key) : undefined
-      const isMissing = !activeDirect && inVueTemplate
+      const isMissing = !activeDirect && (inVueTemplate || inJsxUi)
       if (!textToShow && cfg.get<string>('inlinePreviewKeyMode') !== 'hidden') continue
       const hover = new vscode.MarkdownString()
       if (hoverShowsKey) hover.appendMarkdown(`Key: \`${item.key}\``)
@@ -997,8 +1298,10 @@ export async function activate(context: vscode.ExtensionContext) {
       const startOffset = editor.document.offsetAt(selection.start)
 
       const inVue = isVueFile(filePath)
+      const inJsx = isJsxFile(filePath)
       const isTplText = inVue && isVueTemplateTextNode(docText, startOffset)
       const attrCtx = inVue ? getAttributeContext(docText, startOffset) : null
+      const jsxAttrCtx = !inVue && inJsx ? getJsxAttributeContext(docText, startOffset) : null
 
       const expr = `t('${fullKeyPath}')`
 
@@ -1019,8 +1322,19 @@ export async function activate(context: vscode.ExtensionContext) {
             )
             edit.replace(range, `:${name}="${expr}"`)
           }
+        } else if (jsxAttrCtx) {
+          const { valueStartQuote, valueEndQuote } = jsxAttrCtx
+          // Replace including surrounding quotes with JSX expression {t('...')}
+          const range = new vscode.Range(
+            editor.document.positionAt(valueStartQuote),
+            editor.document.positionAt(valueEndQuote + 1)
+          )
+          edit.replace(range, `{${expr}}`)
         } else if (isTplText) {
           edit.replace(selection, `{{ ${expr} }}`)
+        } else if (inJsx && isLikelyJsxUiContext(docText, startOffset)) {
+          // Wrap UI text with JSX expression
+          edit.replace(selection, `{${expr}}`)
         } else {
           const bounds = findEnclosingStringLiteralBounds(docText, startOffset)
           if (bounds) {
@@ -1037,6 +1351,23 @@ export async function activate(context: vscode.ExtensionContext) {
 
       if (inVue) {
         await ensureVueTDeclaration(editor)
+      } else if (inJsx) {
+        // Auto framework selection
+        const extCfg = vscode.workspace.getConfiguration('stringerHelper')
+        const framework = (extCfg.get<string>('framework', 'auto') || 'auto') as 'auto' | 'vue' | 'react' | 'next'
+        const effective: 'react' | 'next' = (() => {
+          if (framework !== 'auto') return framework as any
+          try {
+            const pkgPath = path.join(projectRoot, 'package.json')
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
+            const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) }
+            if (deps.next) return 'next'
+            return 'react'
+          } catch { return 'react' }
+        })()
+        const selOffset = startOffset
+        if (effective === 'next') await ensureNextTDeclaration(editor, selOffset)
+        else await ensureReactTDeclaration(editor, selOffset)
       }
 
       const shouldShowAlign = (() => {

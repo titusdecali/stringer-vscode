@@ -6,9 +6,7 @@ Stringer i18n Helper (VS Code Extension)
 This extension is a companion to the Stringer CLI.
 </div>
 
-<div align="center" style="font-weight: bold; padding: 5px 0; margin-top: 10px; margin-bottom: 10px; background: linear-gradient(90deg, #47FFC5 0%, #00FF77 100%); color: #000000;">
-This is a BETA and currently only supports VUE & NUXT projects!!
-</div>
+<!-- Beta banner removed: now supports Vue, Nuxt, React, and Next.js -->
 
 <div align="center" style="background: linear-gradient(90deg, #FF4794 0%, #FF7700 100%); color: #fff; padding: 12px 0; border-radius: 7px; font-weight: bold; font-size: 1.1em;">
   You must run the Stringer CLI in your project folder at least once to use this extension.
@@ -61,7 +59,9 @@ From there, you can trigger the `Align Translations` command to align any other 
 - Adds a context menu action: **"🌎 Add i18n key via Stringer"**
 - Writes the selected text into your base language JSON using a globally unique 4‑digit leaf key
 - Replaces the selection in your source file with the correct i18n call
-- Detects context (Vue templates, attributes, script literals) and applies the right syntax
+- Detects context and applies the right syntax:
+  - Vue/Nuxt: templates, attributes, script literals
+  - React/Next: JSX text nodes, JSX attribute values, and string literals
 - Offers a quick, non‑blocking prompt to align other locale files (only when targets exist)
 - Provides a status bar button to open a small Stringer menu (align, website, docs, billing)
 - Shows inline translation previews for `t('key.path')` calls using your project locales
@@ -83,7 +83,7 @@ From there, you can trigger the `Align Translations` command to align any other 
 
 ### Inline translation preview
 
-- Open a `.vue` file that contains `t('...')` calls.
+- Open a `.vue`, `.jsx`, or `.tsx` file that contains `t('...')` calls.
 - The extension reads your Stringer CLI config from `~/.stringer-cli.json` (matching your open workspace) to find `outputDir` and `baseLanguage`, then loads locale JSON files.
 - It displays an inline preview of the resolved translation after each `t('key.path')` call.
 - Hover on a `t('...')` call to see the original key and the current language value.
@@ -109,7 +109,7 @@ By default, the preview language is your configured `baseLanguage`. You can set 
 
 ### Missing key highlighting
 
-- When the active preview language is missing a key that is used inside Vue template text, the inline preview shows a red indicator with “Locale Key Missing!!”.
+- When the active preview language is missing a key used inside Vue template text or JSX UI contexts, the inline preview shows a red indicator with “Locale Key Missing!!”.
 - This is a strong signal that your target locales are out of sync with the base language.
 - Fix it by running alignment: click the status bar “Stringer” button → pick “Align Translations”, or run `stringer align` in your terminal.
 
@@ -125,6 +125,10 @@ By default, the preview language is your configured `baseLanguage`. You can set 
 - `stringerHelper.inlinePreviewKeyMode` (string, default `hidden`): choose the preview content. Supported values: `full` (key + text), `hidden` (text only).
 - `stringerHelper.hoverShowsKey` (boolean, default `true`): show the i18n key in hover tooltips.
 - `stringerHelper.autoAlignAfterAdd` (boolean, default `false`): when adding a new key via the command, automatically trigger `stringer align` if other locale files exist.
+- `stringerHelper.framework` (string, default `auto`): tailor add‑key injection for `vue`, `react`, or `next`. When `auto`, the extension detects frameworks from package.json.
+- `stringerHelper.reactInjection` (string, default `react-i18next`): choose React t() source (`react-i18next`) or disable injection.
+- `stringerHelper.nextInjection` (string, default `next-intl`): choose Next.js t() source (`next-intl`) or disable injection.
+- `stringerHelper.cliConfigPath` (string): optional absolute override to `.stringer-cli.json` when auto-detection fails (useful on Windows/WSL).
 
 Notes:
 - Make sure you’ve run any Stringer CLI flow at least once so `~/.stringer-cli.json` exists and your project is registered.
