@@ -2,7 +2,7 @@
   "name": "stringer-helper",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "publisher": "titusdecali",
   "icon": "images/stringerIcon.png",
   "repository": {
@@ -47,12 +47,24 @@
         "title": "%command.stringer.addI18nKey.title%"
       },
       {
+        "command": "stringer.restoreStringAndDeleteKey",
+        "title": "%command.stringer.restoreStringAndDeleteKey.title%"
+      },
+      {
+        "command": "stringer.revertToOriginalText",
+        "title": "%command.stringer.revertToOriginalText.title%"
+      },
+      {
         "command": "stringer.showMenu",
         "title": "Stringer: Open Menu"
       },
       {
         "command": "stringer.changePreviewLanguage",
         "title": "Stringer: Change Preview Language"
+      },
+      {
+        "command": "stringer.changeLocalesFolder",
+        "title": "Stringer: Select Locales Folder"
       },
       {
         "command": "stringer.toggleInlinePreview",
@@ -69,6 +81,14 @@
       {
         "command": "stringer.reloadLocales",
         "title": "Stringer: Reload Locales"
+      },
+      {
+        "command": "stringer.ignoreLine",
+        "title": "Stringer: Ignore this line"
+      },
+      {
+        "command": "stringer.ignoreFile",
+        "title": "Stringer: Ignore this file"
       }
     ],
     "menus": {
@@ -77,6 +97,26 @@
           "command": "stringer.addI18nKey",
           "group": "navigation@9",
           "when": "editorHasSelection && resourceExtname =~ /\\.(js|jsx|ts|tsx|vue|svelte|mdx|md)$/"
+        },
+        {
+          "command": "stringer.restoreStringAndDeleteKey",
+          "group": "navigation@9",
+          "when": "stringer.hasI18nKeyAtCursor && resourceExtname =~ /\\.(js|jsx|ts|tsx|vue|svelte|mdx|md)$/"
+        },
+        {
+          "command": "stringer.revertToOriginalText",
+          "group": "navigation@9",
+          "when": "stringer.hasI18nKeyAtCursor && resourceExtname =~ /\\.(js|jsx|ts|tsx|vue|svelte|mdx|md)$/"
+        },
+        {
+          "command": "stringer.ignoreLine",
+          "group": "navigation@9",
+          "when": "editorTextFocus && resourceExtname =~ /\\.(js|jsx|ts|tsx|vue|svelte|mdx|md)$/"
+        },
+        {
+          "command": "stringer.ignoreFile",
+          "group": "navigation@9",
+          "when": "editorTextFocus && resourceExtname =~ /\\.(js|jsx|ts|tsx|vue|svelte|mdx|md)$/"
         }
       ]
     },
@@ -102,6 +142,11 @@
           ],
           "default": "hidden",
           "markdownDescription": "Controls inline key display: `hidden` (no key), `full` (show full key), `leaf` (show 4-digit/leaf only)."
+        },
+        "stringerHelper.previewBackgroundColor": {
+          "type": "string",
+          "default": "hsl(270, 55%, 43%)",
+          "description": "Background color for inline preview badges (CSS color or HEX)."
         },
         "stringerHelper.hoverShowsKey": {
           "type": "boolean",
@@ -153,7 +198,7 @@
   "scripts": {
     "compile": "tsc -p .",
     "watch": "tsc -w -p .",
-    "build": "pnpm run compile"
+    "build": "pnpm run compile && vsce package"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",

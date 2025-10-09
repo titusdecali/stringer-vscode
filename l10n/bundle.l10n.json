@@ -6,5 +6,6 @@
   "error.keypath": "Cannot derive key path from file location.",
   "dialog.align.question": "Your translations are out of alignment. Run \"{0}\" to add missing translations?",
   "common.yes": "Yes",
-  "common.no": "No"
+  "common.no": "No",
+  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
 }

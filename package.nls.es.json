@@ -1,5 +1,7 @@
 {
   "extension.displayName": "Asistente de i18n de Stringer",
   "extension.description": "Agregue claves i18n con Stringer desde texto seleccionado y alinee traducciones.",
-  "command.stringer.addI18nKey.title": "🌎 Agregar clave i18n con Stringer"
+  "command.stringer.addI18nKey.title": "🌐 Stringer: Agregar clave i18n",
+  "command.stringer.restoreStringAndDeleteKey.title": "Stringer: Restaurar texto y eliminar clave i18n",
+  "command.stringer.revertToOriginalText.title": "🌐 Stringer: Revertir al texto original"
 }

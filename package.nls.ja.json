@@ -1,5 +1,7 @@
 {
   "extension.displayName": "Stringer i18n ヘルパー",
   "extension.description": "選択したテキストから Stringer で i18n キーを追加し、翻訳を整合します。",
-  "command.stringer.addI18nKey.title": "🌎 Stringer で i18n キーを追加"
+  "command.stringer.addI18nKey.title": "🌐 Stringer: i18n キーを追加",
+  "command.stringer.restoreStringAndDeleteKey.title": "Stringer: 文字列を復元して i18n キーを削除",
+  "command.stringer.revertToOriginalText.title": "🌐 Stringer: 元のテキストに戻す"
 }

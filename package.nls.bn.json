@@ -1,5 +1,7 @@
 {
   "extension.displayName": "Stringer i18n সহায়ক",
   "extension.description": "নির্বাচিত টেক্সট থেকে Stringer দিয়ে i18n কী যোগ করুন এবং অনুবাদ সমঞ্জস করুন।",
-  "command.stringer.addI18nKey.title": "🌎 Stringer দিয়ে i18n কী যোগ করুন"
+  "command.stringer.addI18nKey.title": "🌐 Stringer: i18n কী যোগ করুন",
+  "command.stringer.restoreStringAndDeleteKey.title": "Stringer: স্ট্রিং পুনরুদ্ধার করুন এবং i18n কী মুছুন",
+  "command.stringer.revertToOriginalText.title": "🌐 Stringer: মূল টেক্সটে ফিরে যান"
 }

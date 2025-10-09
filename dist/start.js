@@ -50,7 +50,7 @@ let localeWatcher = null;
 let cliConfigWatcher = null;
 const decorationType = vscode.window.createTextEditorDecorationType({
     after: {
-        margin: '0 0 0 0.6em',
+        margin: '0 0 0 0.25em',
         color: new vscode.ThemeColor('editorCodeLens.foreground')
     },
     rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed
@@ -62,6 +62,41 @@ const hiddenTextDecorationType = vscode.window.createTextEditorDecorationType({
 // Separate decoration type for rendering values with 'before' so it is not affected by hidden style
 const valueBeforeDecorationType = vscode.window.createTextEditorDecorationType({});
 // Utilities to mirror CLI behavior
+function lastPathSegment(expr) {
+    const parts = String(expr).split('.');
+    return parts[parts.length - 1];
+}
+function normalizeDynamicPlaceholders(value) {
+    let out = value;
+    // Convert {{name}} to {name}
+    out = out.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, v) => `{${lastPathSegment(v)}}`);
+    // Convert ${name} to {name}
+    out = out.replace(/\$\{\s*([\w.]+)\s*\}/g, (_m, v) => `{${lastPathSegment(v)}}`);
+    return out;
+}
+function stripHtmlTagsPreserveText(value) {
+    // Remove tags but keep inner text. Best-effort, non-greedy for tags
+    return value.replace(/<[^>]*>/g, ' ');
+}
+function normalizeWhitespace(value) {
+    return value.replace(/\s+/g, ' ').trim();
+}
+function normalizeSelectedTextForI18n(value) {
+    let v = value;
+    v = normalizeDynamicPlaceholders(v);
+    v = stripHtmlTagsPreserveText(v);
+    v = normalizeWhitespace(v);
+    return v;
+}
+// Extract placeholder parameter names from a normalized i18n string, e.g. "Hello {name} ({count})" -> ['name','count']
+function extractParamsFromNormalizedText(value) {
+    const params = new Set();
+    const rx = /\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}/g;
+    for (let m = rx.exec(value); m; m = rx.exec(value)) {
+        params.add(m[1]);
+    }
+    return Array.from(params);
+}
 function isWsl() {
     try {
         if (process.platform !== 'linux')
@@ -150,6 +185,15 @@ function normalizePath(p) {
     catch {
         return p;
     }
+}
+// Accept locale filenames like en.json, en-US.json, pt_BR.json, zh-Hant.json
+function isLocaleFileName(fileName) {
+    if (!/\.json$/i.test(fileName))
+        return false;
+    const name = fileName.replace(/\.json$/i, '');
+    // Start with 2-3 letters, optional region/script separated by '-' or '_',
+    // and allow one extra segment for variants. Excludes names like 'package'.
+    return /^[a-z]{2,3}([_-][a-zA-Z]{2,4})?([_-][A-Za-z0-9]+)?$/.test(name);
 }
 async function loadCliProjectConfig(projectRoot) {
     const all = readAllCliConfigs();
@@ -269,6 +313,12 @@ async function runAlignInTerminal(cwd) {
     const terminal = vscode.window.createTerminal({ name: vscode.l10n.t('Stringer Align'), cwd });
     terminal.show();
     terminal.sendText('stringer align', true);
+}
+// Run stringer convert in integrated terminal
+async function runConvertInTerminal(cwd) {
+    const terminal = vscode.window.createTerminal({ name: 'Stringer Convert', cwd });
+    terminal.show();
+    terminal.sendText('stringer convert', true);
 }
 // ---------- Simple Vue SFC context detection ----------
 function isVueFile(filePath) {
@@ -576,133 +626,52 @@ async function activate(context) {
             return false;
         const projectRoot = folder.uri.fsPath;
         const config = await loadCliProjectConfig(projectRoot);
-        // Determine localesDir/baseLanguage with fallbacks for missing CLI config
+        // Always rely on a user-selected locales folder (persisted per workspace)
         let localesDir = null;
-        let baseLanguage = 'en';
-        if (config) {
-            const outputDirConfigured = config.outputDir || path.join('i18n', 'locales');
-            // Resolve relative to the CLI-configured projectPath when available (handles nested projects)
-            let effectiveRoot = projectRoot;
-            try {
-                const cfgPath = config.projectPath;
-                if (cfgPath)
-                    effectiveRoot = path.isAbsolute(cfgPath) ? cfgPath : path.resolve(projectRoot, cfgPath);
-            }
-            catch { }
-            localesDir = path.resolve(effectiveRoot, outputDirConfigured);
-            baseLanguage = config.baseLanguage || 'en';
-            // Use effective root for project context so other features compute paths correctly
-            projectContext = { projectRoot: effectiveRoot, localesDir, baseLanguage };
-            // Initialize preview language from settings or base language
-            const extConfig = vscode.workspace.getConfiguration('stringerHelper');
-            const preferred = extConfig.get('defaultPreviewLanguage');
-            // Derive available languages from actual filenames in localesDir
-            let available = [];
-            try {
-                available = fs
-                    .readdirSync(localesDir)
-                    .filter((f) => f.endsWith('.json'))
-                    .map((f) => f.replace(/\.json$/, ''));
-            }
-            catch { }
-            // Choose active language strictly from available filenames
-            if (preferred && available.includes(preferred))
-                activePreviewLanguage = preferred;
-            else if (available.includes(baseLanguage))
-                activePreviewLanguage = baseLanguage;
-            else
-                activePreviewLanguage = available[0] || baseLanguage;
-            // Setup locale watcher
-            if (localeWatcher) {
-                localeWatcher.dispose();
-                localeWatcher = null;
-            }
-            try {
-                const pattern = new vscode.RelativePattern(localesDir, '*.json');
-                localeWatcher = vscode.workspace.createFileSystemWatcher(pattern);
-                const reload = async () => {
-                    localeCache = {};
-                    await preloadLocales();
-                    refreshActiveEditorDecorations();
-                };
-                localeWatcher.onDidChange(reload);
-                localeWatcher.onDidCreate(reload);
-                localeWatcher.onDidDelete(reload);
-                context.subscriptions.push(localeWatcher);
-            }
-            catch { }
-            await preloadLocales();
-            // Watch CLI config for changes so we can refresh projectContext if user runs the CLI again
-            try {
-                const configPath = findCliConfigPath();
-                if (cliConfigWatcher) {
-                    try {
-                        cliConfigWatcher.close();
-                    }
-                    catch { }
-                    cliConfigWatcher = null;
-                }
-                if (configPath && fs.existsSync(configPath)) {
-                    cliConfigWatcher = fs.watch(configPath, { persistent: false }, async () => {
-                        await ensureProjectContext(vscode.window.activeTextEditor);
-                        refreshActiveEditorDecorations();
-                    });
-                }
-            }
-            catch { }
-            return true;
+        let baseLanguage = config?.baseLanguage || 'en';
+        const stateKey = `stringer.localesDir.${projectRoot}`;
+        try {
+            const saved = context.workspaceState.get(stateKey);
+            if (typeof saved === 'string' && saved && fs.existsSync(saved))
+                localesDir = saved;
         }
-        else {
-            // 1) Try previously saved selection for this workspace
-            const stateKey = `stringer.localesDir.${projectRoot}`;
+        catch { }
+        if (!localesDir) {
+            // Optional convenience: propose a default folder if it exists
+            let defaultUri = folder.uri;
             try {
-                const saved = context.workspaceState.get(stateKey);
-                if (typeof saved === 'string' && saved && fs.existsSync(saved))
-                    localesDir = saved;
+                const candidate = path.resolve(projectRoot, config?.outputDir || path.join('i18n', 'locales'));
+                if (fs.existsSync(candidate))
+                    defaultUri = vscode.Uri.file(candidate);
             }
             catch { }
-            // 2) Search the workspace for any */locales/*.json
-            if (!localesDir) {
-                try {
-                    const found = await vscode.workspace.findFiles(new vscode.RelativePattern(folder, '**/locales/*.json'), '**/node_modules/**', 50);
-                    if (found && found.length > 0) {
-                        localesDir = path.dirname(found[0].fsPath);
-                        try {
-                            await context.workspaceState.update(stateKey, localesDir);
-                        }
-                        catch { }
-                    }
-                }
-                catch { }
-            }
-            // 3) Prompt user to pick the locales folder
-            if (!localesDir) {
-                const pick = await vscode.window.showOpenDialog({
-                    canSelectFolders: true,
-                    canSelectFiles: false,
-                    canSelectMany: false,
-                    title: vscode.l10n.t('No locales folder found. Please select it manually if it exists.'),
-                    defaultUri: folder.uri
-                });
-                if (!pick || pick.length === 0) {
-                    return false;
-                }
-                localesDir = pick[0].fsPath;
-                try {
-                    await context.workspaceState.update(stateKey, localesDir);
-                }
-                catch { }
-            }
-            // Try to infer base language from files
+            const choice = await vscode.window.showInformationMessage(vscode.l10n.t('Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE'), 'Select Folder', 'Later');
+            if (choice !== 'Select Folder')
+                return false;
+            const pick = await vscode.window.showOpenDialog({
+                canSelectFolders: true,
+                canSelectFiles: false,
+                canSelectMany: false,
+                title: vscode.l10n.t('Select your locales folder (contains *.json locale files)'),
+                defaultUri
+            });
+            if (!pick || pick.length === 0)
+                return false;
+            localesDir = pick[0].fsPath;
             try {
-                const files = fs.readdirSync(localesDir).filter((f) => f.endsWith('.json'));
-                if (files.includes('en.json'))
-                    baseLanguage = 'en';
-                else if (files.length > 0)
-                    baseLanguage = files[0].replace(/\.json$/, '');
+                await context.workspaceState.update(stateKey, localesDir);
             }
             catch { }
         }
+        // Infer base language from files if possible
+        try {
+            const files = fs.readdirSync(localesDir).filter((f) => isLocaleFileName(f));
+            if (files.includes('en.json'))
+                baseLanguage = 'en';
+            else if (files.length > 0)
+                baseLanguage = files[0].replace(/\.json$/, '');
+        }
+        catch { }
         projectContext = { projectRoot, localesDir: localesDir, baseLanguage };
         // Initialize preview language from settings or base language
         const extConfig = vscode.workspace.getConfiguration('stringerHelper');
@@ -712,7 +681,7 @@ async function activate(context) {
         try {
             available = fs
                 .readdirSync(localesDir)
-                .filter((f) => f.endsWith('.json'))
+                .filter((f) => isLocaleFileName(f))
                 .map((f) => f.replace(/\.json$/, ''));
         }
         catch { }
@@ -743,25 +712,18 @@ async function activate(context) {
         }
         catch { }
         await preloadLocales();
-        // Watch CLI config for changes so we can refresh projectContext if user runs the CLI again
-        try {
-            const configPath = findCliConfigPath();
-            if (cliConfigWatcher) {
-                try {
-                    cliConfigWatcher.close();
-                }
-                catch { }
-                cliConfigWatcher = null;
-            }
-            if (configPath && fs.existsSync(configPath)) {
-                cliConfigWatcher = fs.watch(configPath, { persistent: false }, async () => {
-                    await ensureProjectContext(vscode.window.activeTextEditor);
-                    refreshActiveEditorDecorations();
-                });
-            }
-        }
-        catch { }
         return true;
+    }
+    async function promptOpenWorkspaceFolder() {
+        const pick = await vscode.window.showOpenDialog({
+            canSelectFiles: false,
+            canSelectFolders: true,
+            canSelectMany: false,
+            title: vscode.l10n.t('Open a folder to use Stringer Helper')
+        });
+        if (pick && pick[0]) {
+            await vscode.commands.executeCommand('vscode.openFolder', pick[0], false);
+        }
     }
     function getValueByPath(obj, keyPath) {
         if (!obj)
@@ -871,10 +833,10 @@ async function activate(context) {
     function findTTupleRanges(doc) {
         const text = doc.getText();
         const results = [];
-        // Best-effort regex for t('...') calls; supports nested dot keys and dashes/underscores
-        const rx = /\bt\(\s*['"]([A-Za-z0-9_.-]+)['"]\s*\)/g;
+        // Best-effort regex for t('...') calls; accept any non-quote text (handles slashes and other path chars)
+        const rx = /\bt\(\s*(['"`])([^'"`]+?)\1\s*\)/g;
         for (let m = rx.exec(text); m; m = rx.exec(text)) {
-            const key = m[1];
+            const key = m[2];
             const start = m.index;
             const end = m.index + m[0].length;
             const range = new vscode.Range(doc.positionAt(start), doc.positionAt(end));
@@ -882,16 +844,69 @@ async function activate(context) {
         }
         return results;
     }
+    // Detect <i18n-t keypath="..."> usages inside Vue templates
+    function findI18nKeypathRanges(doc) {
+        const text = doc.getText();
+        const results = [];
+        const rx = /<i18n-t[^>]*\bkeypath\s*=\s*(['"])([^'"\n]+?)\1/gi;
+        for (let m = rx.exec(text); m; m = rx.exec(text)) {
+            const key = m[2];
+            const full = m[0];
+            const rel = full.indexOf(key);
+            const start = m.index + (rel >= 0 ? rel : 0);
+            const end = start + key.length;
+            const range = new vscode.Range(doc.positionAt(start), doc.positionAt(end));
+            results.push({ range, key, isAttribute: true });
+        }
+        return results;
+    }
+    function getTTupleAtPosition(doc, position) {
+        const ranges = findTTupleRanges(doc);
+        for (const r of ranges) {
+            if (r.range.contains(position))
+                return r;
+        }
+        return null;
+    }
+    function escapeHtmlAttr(value) {
+        return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    }
+    function escapeJsString(value, quote = '"') {
+        const q = quote === '"' ? '"' : "'";
+        return value
+            .replace(/\\/g, '\\\\')
+            .replace(/\n/g, '\\n')
+            .replace(/\r/g, '\\r')
+            .replace(new RegExp(q.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g'), `\\${q}`);
+    }
+    function findEnclosingMustache(source, offset) {
+        const openIdx = source.lastIndexOf('{{', offset);
+        if (openIdx === -1)
+            return null;
+        const closeIdx = source.indexOf('}}', openIdx + 2);
+        if (closeIdx === -1)
+            return null;
+        if (offset < openIdx || offset > closeIdx)
+            return null;
+        return { start: openIdx, end: closeIdx + 2 };
+    }
     function decorateEditor(editor) {
         const cfg = vscode.workspace.getConfiguration('stringerHelper');
         const enable = cfg.get('enableInlinePreview', true);
         const keyMode = (cfg.get('inlinePreviewKeyMode') || 'hidden');
         const hoverShowsKey = cfg.get('hoverShowsKey', true);
+        const previewBg = (cfg.get('previewBackgroundColor') || 'hsl(270, 55%, 43%)');
         if (!enable) {
+            // Ensure all decoration layers are cleared when preview is disabled
             editor.setDecorations(decorationType, []);
+            editor.setDecorations(hiddenTextDecorationType, []);
+            editor.setDecorations(valueBeforeDecorationType, []);
             return;
         }
-        const found = findTTupleRanges(editor.document);
+        const found = [
+            ...findTTupleRanges(editor.document),
+            ...findI18nKeypathRanges(editor.document)
+        ];
         const decorations = [];
         const hiddenRanges = [];
         const hiddenModeValueDecorations = [];
@@ -905,12 +920,15 @@ async function activate(context) {
             const startOffset = editor.document.offsetAt(item.range.start);
             const inVueTemplate = isVue && isVueTemplateTextNode(docText, startOffset);
             const inJsxUi = isJsx && isLikelyJsxUiContext(docText, startOffset);
+            const inVueAttr = isVue && !!getAttributeContext(docText, startOffset);
+            const inJsxAttr = isJsx && !!getJsxAttributeContext(docText, startOffset);
             // Missing is determined against the ACTIVE locale file only (no fallback),
             // so removing a key from the active file turns it red immediately.
             const lang = (activePreviewLanguage || projectContext?.baseLanguage);
             const activeDirect = projectContext ? getValueByPath(localeCache[lang], item.key) : undefined;
-            const isMissing = !activeDirect && (inVueTemplate || inJsxUi);
-            if (!textToShow && cfg.get('inlinePreviewKeyMode') !== 'hidden')
+            const isMissing = !activeDirect && (inVueTemplate || inJsxUi || inVueAttr || inJsxAttr);
+            // If there is no value to show (and not a missing-key case) and we're not in hidden mode, skip rendering
+            if (!textToShow && !isMissing && keyMode !== 'hidden')
                 continue;
             const hover = new vscode.MarkdownString();
             if (hoverShowsKey)
@@ -929,14 +947,15 @@ async function activate(context) {
                     range: item.range,
                     // Avoid duplicate hover (decoration + provider); provider will handle it
                     renderOptions: {
-                        after: {
-                            contentText: ` ${isMissing ? 'Locale Key Missing!!' : textToShow} `,
-                            backgroundColor: (isMissing ? 'hsl(0, 70%, 50%)' : 'hsl(270, 55%, 43%)'),
+                        // Use `before` to ensure visibility even when the original range is fully hidden
+                        before: {
+                            contentText: `${isMissing ? 'Locale Key Missing!!' : textToShow}`,
+                            backgroundColor: (isMissing ? 'hsl(0, 70%, 50%)' : previewBg),
                             color: '#ffffff',
-                            margin: '0 0 0 0',
+                            margin: '0 0 0 0.15em',
                             border: '1px solid',
-                            borderColor: (isMissing ? 'hsl(0, 70%, 50%)' : 'hsl(270, 55%, 43%)'),
-                            textDecoration: 'border-radius: 8px; padding: 0 6px;'
+                            borderColor: (isMissing ? 'hsl(0, 70%, 50%)' : previewBg),
+                            textDecoration: 'border-radius: 6px; padding: 0 4px;'
                         }
                     }
                 });
@@ -947,13 +966,13 @@ async function activate(context) {
                     hoverMessage: hover,
                     renderOptions: {
                         after: {
-                            contentText: ` ${keyLabel}${isMissing ? 'Locale Key Missing!!' : textToShow}`,
-                            backgroundColor: (isMissing ? 'hsl(0, 70%, 50%)' : 'hsl(270, 55%, 43%)'),
+                            contentText: `${keyLabel}${isMissing ? 'Locale Key Missing!!' : textToShow}`,
+                            backgroundColor: (isMissing ? 'hsl(0, 70%, 50%)' : previewBg),
                             color: '#ffffff',
-                            margin: '0 0 0 0',
+                            margin: '0 0 0 0.15em',
                             border: '1px solid',
-                            borderColor: (isMissing ? 'hsl(0, 70%, 50%)' : 'hsl(270, 55%, 43%)'),
-                            textDecoration: 'border-radius: 8px; padding: 0 6px;'
+                            borderColor: (isMissing ? 'hsl(0, 70%, 50%)' : previewBg),
+                            textDecoration: 'border-radius: 6px; padding: 0 4px;'
                         }
                     }
                 });
@@ -1001,7 +1020,7 @@ async function activate(context) {
         try {
             return fs
                 .readdirSync(projectContext.localesDir)
-                .filter((f) => f.endsWith('.json'))
+                .filter((f) => isLocaleFileName(f))
                 .map((f) => f.replace(/\.json$/, ''));
         }
         catch {
@@ -1012,7 +1031,7 @@ async function activate(context) {
         if (!projectContext) {
             const ok = await ensureProjectContext(null);
             if (!ok) {
-                vscode.window.showErrorMessage(vscode.l10n.t('Stringer CLI config not found. Run the Stringer CLI once in this project.'));
+                await promptOpenWorkspaceFolder();
                 return;
             }
         }
@@ -1042,7 +1061,6 @@ async function activate(context) {
     langStatusItem.text = '$(globe) Lang';
     langStatusItem.tooltip = 'Change Stringer preview language';
     langStatusItem.command = 'stringer.changePreviewLanguage';
-    langStatusItem.show();
     context.subscriptions.push(langStatusItem);
     function getPreviewModeLabel() {
         const cfg = vscode.workspace.getConfiguration('stringerHelper');
@@ -1056,12 +1074,44 @@ async function activate(context) {
     previewStatusItem.text = `$(eye) Preview: ${getPreviewModeLabel()}`;
     previewStatusItem.tooltip = 'Change Stringer inline preview mode';
     previewStatusItem.command = 'stringer.changePreviewMode';
-    previewStatusItem.show();
     context.subscriptions.push(previewStatusItem);
     const changeLangCmd = vscode.commands.registerCommand('stringer.changePreviewLanguage', async () => {
         await choosePreviewLanguage();
     });
     context.subscriptions.push(changeLangCmd);
+    const changeLocalesDirCmd = vscode.commands.registerCommand('stringer.changeLocalesFolder', async () => {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        const folder = vscode.window.activeTextEditor
+            ? vscode.workspace.getWorkspaceFolder(vscode.window.activeTextEditor.document.uri)
+            : (workspaceFolders && workspaceFolders[0]);
+        if (!folder)
+            return;
+        const projectRoot = folder.uri.fsPath;
+        const stateKey = `stringer.localesDir.${projectRoot}`;
+        const choice = await vscode.window.showInformationMessage(vscode.l10n.t('Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE'), 'Select Folder', 'Later');
+        if (choice !== 'Select Folder')
+            return;
+        const pick = await vscode.window.showOpenDialog({
+            canSelectFolders: true,
+            canSelectFiles: false,
+            canSelectMany: false,
+            title: vscode.l10n.t('Select your locales folder (contains *.json locale files)'),
+            defaultUri: folder.uri
+        });
+        if (!pick || pick.length === 0)
+            return;
+        const localesDir = pick[0].fsPath;
+        try {
+            await context.workspaceState.update(stateKey, localesDir);
+        }
+        catch { }
+        // Reinitialize context and refresh
+        await ensureProjectContext(vscode.window.activeTextEditor);
+        langStatusItem.text = `$(globe) Lang: ${activePreviewLanguage ?? '—'}`;
+        previewStatusItem.text = `$(eye) Preview: ${getPreviewModeLabel()}`;
+        refreshActiveEditorDecorations();
+    });
+    context.subscriptions.push(changeLocalesDirCmd);
     const togglePreviewCmd = vscode.commands.registerCommand('stringer.toggleInlinePreview', async () => {
         const cfg = vscode.workspace.getConfiguration('stringerHelper');
         const cur = cfg.get('enableInlinePreview', true);
@@ -1246,6 +1296,27 @@ async function activate(context) {
             refreshActiveEditorDecorations();
         }
     });
+    async function updateHasKeyContext(editor) {
+        const ed = editor ?? vscode.window.activeTextEditor;
+        if (!ed) {
+            await vscode.commands.executeCommand('setContext', 'stringer.hasI18nKeyAtCursor', false);
+            return;
+        }
+        const pos = ed.selection.active;
+        const hit = getTTupleAtPosition(ed.document, pos);
+        await vscode.commands.executeCommand('setContext', 'stringer.hasI18nKeyAtCursor', !!hit);
+    }
+    vscode.window.onDidChangeTextEditorSelection(async () => {
+        await updateHasKeyContext();
+    });
+    vscode.window.onDidChangeActiveTextEditor(async () => {
+        await updateHasKeyContext();
+    });
+    vscode.workspace.onDidChangeTextDocument(async (e) => {
+        if (vscode.window.activeTextEditor && e.document === vscode.window.activeTextEditor.document) {
+            await updateHasKeyContext(vscode.window.activeTextEditor);
+        }
+    });
     vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('stringerHelper')) {
             refreshActiveEditorDecorations();
@@ -1270,23 +1341,27 @@ async function activate(context) {
                 return;
             }
             const selectedText = editor.document.getText(selection);
-            const selectedString = selectedText.replace(/^['"`]/, '').replace(/['"`]$/, '');
+            const selectedString = normalizeSelectedTextForI18n(selectedText.replace(/^['"`]/, '').replace(/['"`]$/, '').trim());
+            const params = extractParamsFromNormalizedText(selectedString);
             const workspaceFolders = vscode.workspace.workspaceFolders;
             const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri) || (workspaceFolders && workspaceFolders[0]);
             if (!folder) {
-                vscode.window.showErrorMessage(vscode.l10n.t('No workspace folder found.'));
+                await promptOpenWorkspaceFolder();
                 return;
             }
             const projectRoot = folder.uri.fsPath;
             const config = await loadCliProjectConfig(projectRoot);
             if (!config) {
-                vscode.window.showErrorMessage(vscode.l10n.t('Stringer CLI config not found. Run the Stringer CLI once in this project.'));
-                return;
+                const ok = await ensureProjectContext(editor);
+                if (!ok || !projectContext) {
+                    await promptOpenWorkspaceFolder();
+                    return;
+                }
             }
-            const outputDirConfigured = config.outputDir || path.join('i18n', 'locales');
-            const localesDir = path.resolve(projectRoot, outputDirConfigured);
+            const outputDirConfigured = (config && config.outputDir) || projectContext?.localesDir || path.join('i18n', 'locales');
+            const localesDir = projectContext?.localesDir || path.resolve(projectRoot, outputDirConfigured);
             ensureDir(localesDir);
-            const baseLanguage = config.baseLanguage || 'en';
+            const baseLanguage = (config && config.baseLanguage) || (projectContext?.baseLanguage || 'en');
             const baseLangPath = path.join(localesDir, `${baseLanguage}.json`);
             if (!fs.existsSync(baseLangPath)) {
                 ensureDir(path.dirname(baseLangPath));
@@ -1315,7 +1390,8 @@ async function activate(context) {
             const isTplText = inVue && isVueTemplateTextNode(docText, startOffset);
             const attrCtx = inVue ? getAttributeContext(docText, startOffset) : null;
             const jsxAttrCtx = !inVue && inJsx ? getJsxAttributeContext(docText, startOffset) : null;
-            const expr = `t('${fullKeyPath}')`;
+            const paramsObj = params.length > 0 ? `{ ${params.join(', ')} }` : '';
+            const expr = paramsObj ? `t('${fullKeyPath}', ${paramsObj})` : `t('${fullKeyPath}')`;
             await withEdit(editor, (edit) => {
                 if (attrCtx) {
                     const { name, isBound, attrStart, valueStart, valueEnd } = attrCtx;
@@ -1415,6 +1491,318 @@ async function activate(context) {
             isProcessingCommand = false;
         }
     });
+    const restoreAndDeleteCmd = vscode.commands.registerCommand('stringer.restoreStringAndDeleteKey', async () => {
+        if (isProcessingCommand)
+            return;
+        isProcessingCommand = true;
+        try {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor)
+                return;
+            const doc = editor.document;
+            const pos = editor.selection.active;
+            const hit = getTTupleAtPosition(doc, pos);
+            if (!hit) {
+                vscode.window.showInformationMessage(vscode.l10n.t('Place the cursor inside a t(\'key\') call.'));
+                return;
+            }
+            if (!projectContext) {
+                const ok = await ensureProjectContext(editor);
+                if (!ok || !projectContext)
+                    return;
+            }
+            // Load base locale strictly
+            await preloadLocales();
+            const baseJson = localeCache[projectContext.baseLanguage];
+            const baseValue = getValueByPath(baseJson, hit.key) || getValueByPathLoose(baseJson, hit.key);
+            if (typeof baseValue !== 'string') {
+                vscode.window.showErrorMessage(vscode.l10n.t('Base language value not found for {0}', hit.key));
+                return;
+            }
+            const docText = doc.getText();
+            const startOffset = doc.offsetAt(hit.range.start);
+            const filePath = doc.uri.fsPath;
+            const inVue = isVueFile(filePath);
+            const inJsx = isJsxFile(filePath);
+            const inVueTpl = inVue && isVueTemplateTextNode(docText, startOffset);
+            // Compute replacement range and text according to context
+            let replaceStart = hit.range.start;
+            let replaceEnd = hit.range.end;
+            let replacement = '';
+            if (inVue && inVueTpl) {
+                const must = findEnclosingMustache(docText, startOffset);
+                if (must) {
+                    replaceStart = doc.positionAt(must.start);
+                    replaceEnd = doc.positionAt(must.end);
+                    replacement = baseValue;
+                }
+                else {
+                    replacement = baseValue;
+                }
+            }
+            else if (inVue) {
+                const attrCtx = getAttributeContext(docText, startOffset);
+                if (attrCtx) {
+                    const { name, isBound, attrStart, valueStart, valueEnd } = attrCtx;
+                    if (isBound) {
+                        // Replace entire bound attribute with static value
+                        replaceStart = doc.positionAt(attrStart);
+                        replaceEnd = doc.positionAt(valueEnd + 1);
+                        replacement = `${name}="${escapeHtmlAttr(baseValue)}"`;
+                    }
+                    else {
+                        // Replace quoted value content only
+                        replaceStart = doc.positionAt(valueStart);
+                        replaceEnd = doc.positionAt(valueEnd);
+                        replacement = escapeHtmlAttr(baseValue);
+                    }
+                }
+                else {
+                    replacement = `"${escapeJsString(baseValue, '"')}"`;
+                }
+            }
+            else if (inJsx) {
+                // Detect if wrapped by JSX expression braces
+                let left = startOffset - 1;
+                while (left >= 0 && /\s/.test(docText[left]))
+                    left--;
+                let right = doc.offsetAt(hit.range.end);
+                while (right < docText.length && /\s/.test(docText[right]))
+                    right++;
+                const hasBraces = docText[left] === '{' && docText[right] === '}';
+                // Heuristic: attribute if there is an '=' before the '{' and after last '<'
+                const lastLt = docText.lastIndexOf('<', left);
+                const lastGt = docText.lastIndexOf('>', left);
+                const eq = docText.lastIndexOf('=', left);
+                const inAttribute = eq > lastLt && eq > lastGt;
+                if (hasBraces && inAttribute) {
+                    replaceStart = doc.positionAt(left);
+                    replaceEnd = doc.positionAt(right + 1);
+                    replacement = `"${escapeJsString(baseValue, '"')}"`;
+                }
+                else if (hasBraces && !inAttribute) {
+                    // Text node inside JSX
+                    replaceStart = doc.positionAt(left);
+                    replaceEnd = doc.positionAt(right + 1);
+                    replacement = baseValue;
+                }
+                else if (inAttribute) {
+                    // Already quoted string attribute somehow; just swap inside
+                    replacement = `"${escapeJsString(baseValue, '"')}"`;
+                }
+                else {
+                    // Generic JS expression
+                    replacement = `'${escapeJsString(baseValue, "'")}'`;
+                }
+            }
+            else {
+                // Generic TS/JS file
+                replacement = `'${escapeJsString(baseValue, "'")}'`;
+            }
+            await withEdit(editor, (edit) => {
+                edit.replace(new vscode.Range(replaceStart, replaceEnd), replacement);
+            });
+            // Delete key from all locale files
+            const localesDir = projectContext.localesDir;
+            const parts = hit.key.split('.').filter(Boolean);
+            function deletePath(obj, segs, idx = 0) {
+                if (!obj || typeof obj !== 'object')
+                    return false;
+                const key = segs[idx];
+                if (!(key in obj))
+                    return false;
+                if (idx === segs.length - 1) {
+                    delete obj[key];
+                }
+                else {
+                    const becameEmpty = deletePath(obj[key], segs, idx + 1);
+                    // Prune empty containers
+                    if (becameEmpty)
+                        delete obj[key];
+                }
+                return typeof obj === 'object' && Object.keys(obj).length === 0;
+            }
+            try {
+                const files = fs.readdirSync(localesDir).filter((f) => isLocaleFileName(f));
+                for (const f of files) {
+                    try {
+                        const fp = path.join(localesDir, f);
+                        const json = JSON.parse(fs.readFileSync(fp, 'utf-8'));
+                        deletePath(json, parts);
+                        fs.writeFileSync(fp, JSON.stringify(json, null, 2));
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            // Refresh preview
+            localeCache = {};
+            await preloadLocales();
+            refreshActiveEditorDecorations();
+            await updateHasKeyContext(editor);
+        }
+        finally {
+            isProcessingCommand = false;
+        }
+    });
+    context.subscriptions.push(restoreAndDeleteCmd);
+    // Revert only the current t('key') usage to original base-language value (no locale deletion)
+    const revertToOriginalCmd = vscode.commands.registerCommand('stringer.revertToOriginalText', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor)
+            return;
+        const doc = editor.document;
+        const pos = editor.selection.active;
+        const hit = getTTupleAtPosition(doc, pos);
+        if (!hit) {
+            vscode.window.showInformationMessage(vscode.l10n.t("Place the cursor inside a t('key') call."));
+            return;
+        }
+        if (!projectContext) {
+            const ok = await ensureProjectContext(editor);
+            if (!ok || !projectContext)
+                return;
+        }
+        await preloadLocales();
+        const baseJson = localeCache[projectContext.baseLanguage];
+        const baseValue = getValueByPath(baseJson, hit.key) || getValueByPathLoose(baseJson, hit.key);
+        if (typeof baseValue !== 'string') {
+            vscode.window.showErrorMessage(vscode.l10n.t('Base language value not found for {0}', hit.key));
+            return;
+        }
+        const docText = doc.getText();
+        const startOffset = doc.offsetAt(hit.range.start);
+        const filePath = doc.uri.fsPath;
+        const inVue = isVueFile(filePath);
+        const inJsx = isJsxFile(filePath);
+        const inVueTpl = inVue && isVueTemplateTextNode(docText, startOffset);
+        let replaceStart = hit.range.start;
+        let replaceEnd = hit.range.end;
+        let replacement = '';
+        if (inVue && inVueTpl) {
+            const must = findEnclosingMustache(docText, startOffset);
+            if (must) {
+                replaceStart = doc.positionAt(must.start);
+                replaceEnd = doc.positionAt(must.end);
+                replacement = baseValue;
+            }
+            else {
+                replacement = baseValue;
+            }
+        }
+        else if (inVue) {
+            const attrCtx = getAttributeContext(docText, startOffset);
+            if (attrCtx) {
+                const { name, isBound, attrStart, valueStart, valueEnd } = attrCtx;
+                if (isBound) {
+                    replaceStart = doc.positionAt(attrStart);
+                    replaceEnd = doc.positionAt(valueEnd + 1);
+                    replacement = `${name}="${escapeHtmlAttr(baseValue)}"`;
+                }
+                else {
+                    replaceStart = doc.positionAt(valueStart);
+                    replaceEnd = doc.positionAt(valueEnd);
+                    replacement = escapeHtmlAttr(baseValue);
+                }
+            }
+            else {
+                replacement = `"${escapeJsString(baseValue, '"')}"`;
+            }
+        }
+        else if (inJsx) {
+            let left = startOffset - 1;
+            while (left >= 0 && /\s/.test(docText[left]))
+                left--;
+            let right = doc.offsetAt(hit.range.end);
+            while (right < docText.length && /\s/.test(docText[right]))
+                right++;
+            const hasBraces = docText[left] === '{' && docText[right] === '}';
+            const lastLt = docText.lastIndexOf('<', left);
+            const lastGt = docText.lastIndexOf('>', left);
+            const eq = docText.lastIndexOf('=', left);
+            const inAttribute = eq > lastLt && eq > lastGt;
+            if (hasBraces && inAttribute) {
+                replaceStart = doc.positionAt(left);
+                replaceEnd = doc.positionAt(right + 1);
+                replacement = `"${escapeJsString(baseValue, '"')}"`;
+            }
+            else if (hasBraces && !inAttribute) {
+                replaceStart = doc.positionAt(left);
+                replaceEnd = doc.positionAt(right + 1);
+                replacement = baseValue;
+            }
+            else if (inAttribute) {
+                replacement = `"${escapeJsString(baseValue, '"')}"`;
+            }
+            else {
+                replacement = `'${escapeJsString(baseValue, "'")}'`;
+            }
+        }
+        else {
+            replacement = `'${escapeJsString(baseValue, "'")}'`;
+        }
+        await withEdit(editor, (edit) => {
+            edit.replace(new vscode.Range(replaceStart, replaceEnd), replacement);
+        });
+        refreshActiveEditorDecorations();
+        await updateHasKeyContext(editor);
+    });
+    context.subscriptions.push(revertToOriginalCmd);
+    // Ignore this line: inserts language-appropriate comment with @stringer-ignore-next-line
+    const ignoreLineCmd = vscode.commands.registerCommand('stringer.ignoreLine', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor)
+            return;
+        const doc = editor.document;
+        const pos = editor.selection.active;
+        const langId = doc.languageId;
+        const getLineComment = (languageId) => {
+            // Default to //, HTML/Vue template to <!-- -->, but we insert as single-line style where possible
+            if (languageId === 'html')
+                return '<!-- @stringer-ignore-next-line -->';
+            if (languageId === 'vue') {
+                // Insert as JS comment above the script/template line; prefer //
+                return '// @stringer-ignore-next-line';
+            }
+            if (languageId === 'javascript' || languageId === 'typescript' || languageId === 'javascriptreact' || languageId === 'typescriptreact') {
+                return '// @stringer-ignore-next-line';
+            }
+            if (languageId === 'markdown')
+                return '<!-- @stringer-ignore-next-line -->';
+            return '// @stringer-ignore-next-line';
+        };
+        const line = doc.lineAt(pos.line);
+        const insertPos = new vscode.Position(line.lineNumber, 0);
+        const prefix = getLineComment(doc.languageId);
+        await withEdit(editor, (edit) => {
+            edit.insert(insertPos, `${prefix}\n`);
+        });
+    });
+    context.subscriptions.push(ignoreLineCmd);
+    // Ignore this file: insert a top-of-file marker @stringer-ignore
+    const ignoreFileCmd = vscode.commands.registerCommand('stringer.ignoreFile', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor)
+            return;
+        const doc = editor.document;
+        const firstLine = doc.lineAt(0);
+        const langId = doc.languageId;
+        const getFileHeaderComment = (languageId) => {
+            if (languageId === 'html' || languageId === 'markdown')
+                return '<!-- @stringer-ignore -->\n';
+            // Default JS/TS style
+            return '// @stringer-ignore\n';
+        };
+        const header = getFileHeaderComment(langId);
+        // If already present, skip
+        const text = doc.getText();
+        if (text.includes('@stringer-ignore'))
+            return;
+        await withEdit(editor, (edit) => {
+            edit.insert(new vscode.Position(0, 0), header);
+        });
+    });
+    context.subscriptions.push(ignoreFileCmd);
     // Status Bar Button
     const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBarItem.text = '$(globe) Stringer';
@@ -1429,8 +1817,17 @@ async function activate(context) {
                 label: 'Align Translations',
                 description: 'Add any missing translations for target languages based on your base language JSON file'
             },
+            {
+                label: 'Convert Strings to i18n Keys',
+                description: 'Run "stringer convert" in the integrated terminal for this project'
+            },
+            {
+                label: 'Select Locales folder',
+                description: 'Pick the folder that contains your locale *.json files'
+            },
             { label: 'Change Preview Language', description: 'Switch inline preview locale' },
             { label: 'Change Preview Mode', description: 'Switch inline preview content' },
+            { label: 'Change Preview Color', description: 'Set the background color of inline previews (HSL, RGB, or color name)' },
             { label: 'Open Website', description: 'stringer-cli.com' },
             { label: 'Open Docs', description: 'docs.stringer-cli.com' },
             { label: 'Open Billing', description: 'stringer-cli.com/billing' }
@@ -1440,6 +1837,20 @@ async function activate(context) {
         });
         if (!pick)
             return;
+        if (pick.label === 'Change Preview Color') {
+            const cfg = vscode.workspace.getConfiguration('stringerHelper');
+            const current = cfg.get('previewBackgroundColor') || 'hsl(270, 55%, 43%)';
+            const val = await vscode.window.showInputBox({
+                title: 'Stringer: Change Preview Color',
+                placeHolder: '#aabbcc or any CSS color',
+                value: String(current)
+            });
+            if (val) {
+                await cfg.update('previewBackgroundColor', val, vscode.ConfigurationTarget.Global);
+                refreshActiveEditorDecorations();
+            }
+            return;
+        }
         if (pick.label === 'Align Translations') {
             const workspaceFolders = vscode.workspace.workspaceFolders;
             const folder = vscode.window.activeTextEditor
@@ -1450,6 +1861,22 @@ async function activate(context) {
                 return;
             }
             await runAlignInTerminal(folder.uri.fsPath);
+            return;
+        }
+        if (pick.label === 'Convert Strings to i18n Keys') {
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            const folder = vscode.window.activeTextEditor
+                ? vscode.workspace.getWorkspaceFolder(vscode.window.activeTextEditor.document.uri)
+                : (workspaceFolders && workspaceFolders[0]);
+            if (!folder) {
+                vscode.window.showErrorMessage(vscode.l10n.t('No workspace folder found.'));
+                return;
+            }
+            await runConvertInTerminal(folder.uri.fsPath);
+            return;
+        }
+        if (pick.label === 'Select Locales folder') {
+            await vscode.commands.executeCommand('stringer.changeLocalesFolder');
             return;
         }
         if (pick.label === 'Change Preview Language') {

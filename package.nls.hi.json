@@ -1,5 +1,7 @@
 {
   "extension.displayName": "Stringer i18n सहायक",
   "extension.description": "चयनित पाठ से Stringer के माध्यम से i18n कुंजियाँ जोड़ें और अनुवादों को संरेखित करें।",
-  "command.stringer.addI18nKey.title": "🌎 Stringer के माध्यम से i18n कुंजी जोड़ें"
+  "command.stringer.addI18nKey.title": "🌐 Stringer: i18n कुंजी जोड़ें",
+  "command.stringer.restoreStringAndDeleteKey.title": "Stringer: स्ट्रिंग बहाल करें और i18n कुंजी हटाएँ",
+  "command.stringer.revertToOriginalText.title": "🌐 Stringer: मूल पाठ पर लौटाएँ"
 }

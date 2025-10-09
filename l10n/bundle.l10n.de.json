@@ -6,5 +6,6 @@
   "error.keypath": "Schlüsselpfad kann nicht aus dem Dateispeicherort abgeleitet werden.",
   "dialog.align.question": "Ihre Übersetzungen sind nicht ausgerichtet. \"{0}\" ausführen, um fehlende Übersetzungen hinzuzufügen?",
   "common.yes": "Ja",
-  "common.no": "Nein"
+  "common.no": "Nein",
+  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
 }

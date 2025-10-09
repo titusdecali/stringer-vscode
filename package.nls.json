@@ -1,5 +1,7 @@
 {
   "extension.displayName": "Stringer i18n Helper",
   "extension.description": "Add i18n keys via Stringer from selected text and align translations.",
-  "command.stringer.addI18nKey.title": "🌎 Add i18n key via Stringer"
+  "command.stringer.addI18nKey.title": "🌐 Stringer: Add i18n key",
+  "command.stringer.restoreStringAndDeleteKey.title": "🌐 Stringer: Restore string & delete i18n key",
+  "command.stringer.revertToOriginalText.title": "🌐 Stringer: Revert to Original Text"
 }

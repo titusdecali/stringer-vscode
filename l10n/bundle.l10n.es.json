@@ -6,5 +6,6 @@
   "error.keypath": "No se puede derivar la ruta de clave desde la ubicación del archivo.",
   "dialog.align.question": "Sus traducciones no están alineadas. ¿Ejecutar \"{0}\" para agregar traducciones faltantes?",
   "common.yes": "Sí",
-  "common.no": "No"
+  "common.no": "No",
+  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
 }

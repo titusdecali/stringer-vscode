@@ -1,5 +1,7 @@
 {
   "extension.displayName": "Помощник i18n для Stringer",
   "extension.description": "Добавляйте i18n‑ключи через Stringer из выделенного текста и выравнивайте переводы.",
-  "command.stringer.addI18nKey.title": "🌎 Добавить i18n‑ключ через Stringer"
+  "command.stringer.addI18nKey.title": "🌐 Stringer: Добавить i18n‑ключ",
+  "command.stringer.restoreStringAndDeleteKey.title": "Stringer: Восстановить строку и удалить i18n‑ключ",
+  "command.stringer.revertToOriginalText.title": "🌐 Stringer: Вернуть исходный текст"
 }

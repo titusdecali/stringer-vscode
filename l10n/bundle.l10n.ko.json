@@ -6,5 +6,6 @@
   "error.keypath": "파일 위치에서 키 경로를 유도할 수 없습니다.",
   "dialog.align.question": "번역이 정렬되어 있지 않습니다. 누락된 번역을 추가하려면 \"{0}\"를 실행하시겠습니까?",
   "common.yes": "예",
-  "common.no": "아니오"
+  "common.no": "아니오",
+  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
 }

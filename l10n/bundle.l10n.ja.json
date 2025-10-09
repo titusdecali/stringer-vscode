@@ -6,5 +6,6 @@
   "error.keypath": "ファイルの場所からキーのパスを導出できません。",
   "dialog.align.question": "翻訳が整合していません。欠落している翻訳を追加するために \"{0}\" を実行しますか？",
   "common.yes": "はい",
-  "common.no": "いいえ"
+  "common.no": "いいえ",
+  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
 }

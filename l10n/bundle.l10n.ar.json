@@ -6,5 +6,6 @@
   "error.keypath": "لا يمكن اشتقاق مسار المفتاح من موقع الملف.",
   "dialog.align.question": "ترجماتك غير متسقة. هل تريد تشغيل \"{0}\" لإضافة الترجمات المفقودة؟",
   "common.yes": "نعم",
-  "common.no": "لا"
+  "common.no": "لا",
+  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
 }

@@ -6,5 +6,6 @@
   "error.keypath": "ফাইল অবস্থান থেকে কী পথ নির্ণয় করা যাচ্ছে না।",
   "dialog.align.question": "আপনার অনুবাদগুলো অসমাঞ্জস্য। অনুপস্থিত অনুবাদ যোগ করতে \"{0}\" চালাবেন?",
   "common.yes": "হ্যাঁ",
-  "common.no": "না"
+  "common.no": "না",
+  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
 }

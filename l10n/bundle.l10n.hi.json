@@ -6,5 +6,6 @@
   "error.keypath": "फ़ाइल स्थान से कुंजी पथ प्राप्त नहीं किया जा सका।",
   "dialog.align.question": "आपके अनुवाद असंगत हैं। क्या गायब अनुवाद जोड़ने के लिए \"{0}\" चलाना है?",
   "common.yes": "हाँ",
-  "common.no": "नहीं"
+  "common.no": "नहीं",
+  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
 }

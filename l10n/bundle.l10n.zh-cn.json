@@ -6,5 +6,6 @@
   "error.keypath": "无法根据文件位置推导键路径。",
   "dialog.align.question": "您的翻译未对齐。是否运行 \"{0}\" 以添加缺失的翻译？",
   "common.yes": "是",
-  "common.no": "否"
+  "common.no": "否",
+  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
 }

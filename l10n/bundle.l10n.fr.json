@@ -1,10 +1,11 @@
 {
   "terminal.align.name": "Stringer Alignement",
   "msg.select.string": "Sélectionnez un texte pour ajouter une clé i18n avec Stringer.",
-  "error.no.workspace": "Aucun dossier d’espace de travail trouvé.",
+  "error.no.workspace": "Aucun dossier d'espace de travail trouvé.",
   "error.no.config": "Configuration Stringer CLI introuvable. Exécutez Stringer CLI une fois dans ce projet.",
-  "error.keypath": "Impossible de déduire le chemin de la clé à partir de l’emplacement du fichier.",
+  "error.keypath": "Impossible de déduire le chemin de la clé à partir de l'emplacement du fichier.",
   "dialog.align.question": "Vos traductions ne sont pas alignées. Exécuter \"{0}\" pour ajouter les traductions manquantes ?",
   "common.yes": "Oui",
-  "common.no": "Non"
+  "common.no": "Non",
+  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
 }
