@@ -47,48 +47,44 @@
         "title": "%command.stringer.addI18nKey.title%"
       },
       {
-        "command": "stringer.restoreStringAndDeleteKey",
-        "title": "%command.stringer.restoreStringAndDeleteKey.title%"
-      },
-      {
         "command": "stringer.revertToOriginalText",
         "title": "%command.stringer.revertToOriginalText.title%"
       },
       {
         "command": "stringer.showMenu",
-        "title": "Stringer: Open Menu"
+        "title": "%command.stringer.showMenu.title%"
       },
       {
         "command": "stringer.changePreviewLanguage",
-        "title": "Stringer: Change Preview Language"
+        "title": "%command.stringer.changePreviewLanguage.title%"
       },
       {
         "command": "stringer.changeLocalesFolder",
-        "title": "Stringer: Select Locales Folder"
+        "title": "%command.stringer.changeLocalesFolder.title%"
       },
       {
         "command": "stringer.toggleInlinePreview",
-        "title": "Stringer: Toggle Inline Translation Preview"
+        "title": "%command.stringer.toggleInlinePreview.title%"
       },
       {
         "command": "stringer.changePreviewMode",
-        "title": "Stringer: Change Preview Mode"
+        "title": "%command.stringer.changePreviewMode.title%"
       },
       {
         "command": "stringer.openControlPanel",
-        "title": "Stringer: Open Control Panel"
+        "title": "%command.stringer.openControlPanel.title%"
       },
       {
         "command": "stringer.reloadLocales",
-        "title": "Stringer: Reload Locales"
+        "title": "%command.stringer.reloadLocales.title%"
       },
       {
         "command": "stringer.ignoreLine",
-        "title": "Stringer: Ignore this line"
+        "title": "%command.stringer.ignoreLine.title%"
       },
       {
         "command": "stringer.ignoreFile",
-        "title": "Stringer: Ignore this file"
+        "title": "%command.stringer.ignoreFile.title%"
       }
     ],
     "menus": {
@@ -97,11 +93,6 @@
           "command": "stringer.addI18nKey",
           "group": "navigation@9",
           "when": "editorHasSelection && resourceExtname =~ /\\.(js|jsx|ts|tsx|vue|svelte|mdx|md)$/"
-        },
-        {
-          "command": "stringer.restoreStringAndDeleteKey",
-          "group": "navigation@9",
-          "when": "stringer.hasI18nKeyAtCursor && resourceExtname =~ /\\.(js|jsx|ts|tsx|vue|svelte|mdx|md)$/"
         },
         {
           "command": "stringer.revertToOriginalText",

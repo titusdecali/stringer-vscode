@@ -2,6 +2,14 @@
   "extension.displayName": "Assistant i18n Stringer",
   "extension.description": "Ajoutez des clés i18n via Stringer depuis un texte sélectionné et alignez les traductions.",
   "command.stringer.addI18nKey.title": "🌐 Stringer : Ajouter une clé i18n",
-  "command.stringer.restoreStringAndDeleteKey.title": "Stringer : Restaurer le texte et supprimer la clé i18n",
-  "command.stringer.revertToOriginalText.title": "🌐 Stringer : Revenir au texte d’origine"
+  "command.stringer.revertToOriginalText.title": "🌐 Stringer : Revenir au texte d’origine",
+  "command.stringer.ignoreLine.title": "🌐 Stringer : Ignorer cette ligne",
+  "command.stringer.ignoreFile.title": "🌐 Stringer : Ignorer ce fichier",
+  "command.stringer.showMenu.title": "Stringer : Ouvrir le menu",
+  "command.stringer.changePreviewLanguage.title": "🌐 Stringer : Changer la langue d’aperçu",
+  "command.stringer.changeLocalesFolder.title": "🌐 Stringer : Sélectionner le dossier des locales",
+  "command.stringer.toggleInlinePreview.title": "🌐 Stringer : Activer/désactiver l’aperçu de traduction inline",
+  "command.stringer.changePreviewMode.title": "🌐 Stringer : Changer le mode d’aperçu",
+  "command.stringer.openControlPanel.title": "🌐 Stringer : Ouvrir le panneau de contrôle",
+  "command.stringer.reloadLocales.title": "🌐 Stringer : Recharger les locales"
 }

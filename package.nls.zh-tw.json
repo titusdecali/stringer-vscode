@@ -2,6 +2,14 @@
   "extension.displayName": "Stringer i18n 助手",
   "extension.description": "透過 Stringer 從選取文字新增 i18n 金鑰，並對齊翻譯。",
   "command.stringer.addI18nKey.title": "🌐 Stringer：新增 i18n 金鑰",
-  "command.stringer.restoreStringAndDeleteKey.title": "Stringer：還原字串並刪除 i18n 金鑰",
-  "command.stringer.revertToOriginalText.title": "🌐 Stringer：還原為原始文字"
+  "command.stringer.revertToOriginalText.title": "🌐 Stringer：還原為原始文字",
+  "command.stringer.ignoreLine.title": "🌐 Stringer：忽略此行",
+  "command.stringer.ignoreFile.title": "🌐 Stringer：忽略此檔案",
+  "command.stringer.showMenu.title": "Stringer：開啟選單",
+  "command.stringer.changePreviewLanguage.title": "🌐 Stringer：變更預覽語言",
+  "command.stringer.changeLocalesFolder.title": "🌐 Stringer：選取語言資料夾",
+  "command.stringer.toggleInlinePreview.title": "🌐 Stringer：切換內嵌翻譯預覽",
+  "command.stringer.changePreviewMode.title": "🌐 Stringer：變更預覽模式",
+  "command.stringer.openControlPanel.title": "🌐 Stringer：開啟控制面板",
+  "command.stringer.reloadLocales.title": "🌐 Stringer：重新載入語言"
 }

@@ -2,6 +2,14 @@
   "extension.displayName": "Stringer i18n ヘルパー",
   "extension.description": "選択したテキストから Stringer で i18n キーを追加し、翻訳を整合します。",
   "command.stringer.addI18nKey.title": "🌐 Stringer: i18n キーを追加",
-  "command.stringer.restoreStringAndDeleteKey.title": "Stringer: 文字列を復元して i18n キーを削除",
-  "command.stringer.revertToOriginalText.title": "🌐 Stringer: 元のテキストに戻す"
+  "command.stringer.revertToOriginalText.title": "🌐 Stringer: 元のテキストに戻す",
+  "command.stringer.ignoreLine.title": "🌐 Stringer: この行を無視",
+  "command.stringer.ignoreFile.title": "🌐 Stringer: このファイルを無視",
+  "command.stringer.showMenu.title": "Stringer: メニューを開く",
+  "command.stringer.changePreviewLanguage.title": "🌐 Stringer: プレビュー言語を変更",
+  "command.stringer.changeLocalesFolder.title": "🌐 Stringer: ロケールフォルダーを選択",
+  "command.stringer.toggleInlinePreview.title": "🌐 Stringer: インライン翻訳プレビューを切り替え",
+  "command.stringer.changePreviewMode.title": "🌐 Stringer: プレビューモードを変更",
+  "command.stringer.openControlPanel.title": "🌐 Stringer: コントロールパネルを開く",
+  "command.stringer.reloadLocales.title": "🌐 Stringer: ロケールを再読み込み"
 }

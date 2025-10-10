@@ -2,6 +2,14 @@
   "extension.displayName": "Stringer i18n सहायक",
   "extension.description": "चयनित पाठ से Stringer के माध्यम से i18n कुंजियाँ जोड़ें और अनुवादों को संरेखित करें।",
   "command.stringer.addI18nKey.title": "🌐 Stringer: i18n कुंजी जोड़ें",
-  "command.stringer.restoreStringAndDeleteKey.title": "Stringer: स्ट्रिंग बहाल करें और i18n कुंजी हटाएँ",
-  "command.stringer.revertToOriginalText.title": "🌐 Stringer: मूल पाठ पर लौटाएँ"
+  "command.stringer.revertToOriginalText.title": "🌐 Stringer: मूल पाठ पर लौटाएँ",
+  "command.stringer.ignoreLine.title": "🌐 Stringer: इस पंक्ति को नज़रअंदाज़ करें",
+  "command.stringer.ignoreFile.title": "🌐 Stringer: इस फ़ाइल को नज़रअंदाज़ करें",
+  "command.stringer.showMenu.title": "Stringer: मेनू खोलें",
+  "command.stringer.changePreviewLanguage.title": "🌐 Stringer: पूर्वावलोकन भाषा बदलें",
+  "command.stringer.changeLocalesFolder.title": "🌐 Stringer: लोकैल फ़ोल्डर चुनें",
+  "command.stringer.toggleInlinePreview.title": "🌐 Stringer: इनलाइन अनुवाद पूर्वावलोकन टॉगल करें",
+  "command.stringer.changePreviewMode.title": "🌐 Stringer: पूर्वावलोकन मोड बदलें",
+  "command.stringer.openControlPanel.title": "🌐 Stringer: नियंत्रण पैनल खोलें",
+  "command.stringer.reloadLocales.title": "🌐 Stringer: लोकैल पुनः लोड करें"
 }

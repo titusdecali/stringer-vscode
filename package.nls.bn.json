@@ -2,6 +2,14 @@
   "extension.displayName": "Stringer i18n সহায়ক",
   "extension.description": "নির্বাচিত টেক্সট থেকে Stringer দিয়ে i18n কী যোগ করুন এবং অনুবাদ সমঞ্জস করুন।",
   "command.stringer.addI18nKey.title": "🌐 Stringer: i18n কী যোগ করুন",
-  "command.stringer.restoreStringAndDeleteKey.title": "Stringer: স্ট্রিং পুনরুদ্ধার করুন এবং i18n কী মুছুন",
-  "command.stringer.revertToOriginalText.title": "🌐 Stringer: মূল টেক্সটে ফিরে যান"
+  "command.stringer.revertToOriginalText.title": "🌐 Stringer: মূল টেক্সটে ফিরে যান",
+  "command.stringer.ignoreLine.title": "🌐 Stringer: এই লাইনটি উপেক্ষা করুন",
+  "command.stringer.ignoreFile.title": "🌐 Stringer: এই ফাইলটি উপেক্ষা করুন",
+  "command.stringer.showMenu.title": "Stringer: মেনু খুলুন",
+  "command.stringer.changePreviewLanguage.title": "🌐 Stringer: প্রিভিউ ভাষা পরিবর্তন করুন",
+  "command.stringer.changeLocalesFolder.title": "🌐 Stringer: লোকেলস ফোল্ডার নির্বাচন করুন",
+  "command.stringer.toggleInlinePreview.title": "🌐 Stringer: ইনলাইন অনুবাদ প্রিভিউ টগল করুন",
+  "command.stringer.changePreviewMode.title": "🌐 Stringer: প্রিভিউ মোড পরিবর্তন করুন",
+  "command.stringer.openControlPanel.title": "🌐 Stringer: কন্ট্রোল প্যানেল খুলুন",
+  "command.stringer.reloadLocales.title": "🌐 Stringer: লোকেলস রিলোড করুন"
 }

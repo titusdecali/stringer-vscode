@@ -2,6 +2,14 @@
   "extension.displayName": "Stringer i18n 助手",
   "extension.description": "通过 Stringer 从所选文本添加 i18n 键，并对齐翻译。",
   "command.stringer.addI18nKey.title": "🌐 Stringer：添加 i18n 键",
-  "command.stringer.restoreStringAndDeleteKey.title": "Stringer：恢复字符串并删除 i18n 键",
-  "command.stringer.revertToOriginalText.title": "🌐 Stringer：还原为原始文本"
+  "command.stringer.revertToOriginalText.title": "🌐 Stringer：还原为原始文本",
+  "command.stringer.ignoreLine.title": "🌐 Stringer：忽略此行",
+  "command.stringer.ignoreFile.title": "🌐 Stringer：忽略此文件",
+  "command.stringer.showMenu.title": "Stringer：打开菜单",
+  "command.stringer.changePreviewLanguage.title": "🌐 Stringer：更改预览语言",
+  "command.stringer.changeLocalesFolder.title": "🌐 Stringer：选择语言文件夹",
+  "command.stringer.toggleInlinePreview.title": "🌐 Stringer：切换内联翻译预览",
+  "command.stringer.changePreviewMode.title": "🌐 Stringer：更改预览模式",
+  "command.stringer.openControlPanel.title": "🌐 Stringer：打开控制面板",
+  "command.stringer.reloadLocales.title": "🌐 Stringer：重新加载语言"
 }

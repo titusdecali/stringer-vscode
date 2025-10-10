@@ -315,8 +315,8 @@ async function runAlignInTerminal(cwd) {
     terminal.sendText('stringer align', true);
 }
 // Run stringer convert in integrated terminal
-async function runConvertInTerminal(cwd) {
-    const terminal = vscode.window.createTerminal({ name: 'Stringer Convert', cwd });
+    async function runConvertInTerminal(cwd) {
+        const terminal = vscode.window.createTerminal({ name: vscode.l10n.t('Stringer Convert'), cwd });
     terminal.show();
     terminal.sendText('stringer convert', true);
 }
@@ -333,6 +333,27 @@ function getTemplateRange(source) {
     if (closeIdx === -1)
         return null;
     return { start, end: closeIdx };
+}
+// Return all <script> block ranges inside a Vue SFC
+function getScriptRanges(source) {
+    const ranges = [];
+    const rx = /<script(?:\s[^>]*)?>/gi;
+    for (let m = rx.exec(source); m; m = rx.exec(source)) {
+        const openIdx = m.index + m[0].length;
+        const closeIdx = source.indexOf('</script>', openIdx);
+        if (closeIdx !== -1) {
+            ranges.push({ start: openIdx, end: closeIdx });
+        }
+    }
+    return ranges;
+}
+function isInsideVueScript(source, offset) {
+    const ranges = getScriptRanges(source);
+    for (const r of ranges) {
+        if (offset >= r.start && offset <= r.end)
+            return true;
+    }
+    return false;
 }
 function isInsideOpeningOrClosingTag(source, offset) {
     const lastLt = source.lastIndexOf('<', offset);
@@ -833,8 +854,8 @@ async function activate(context) {
     function findTTupleRanges(doc) {
         const text = doc.getText();
         const results = [];
-        // Best-effort regex for t('...') calls; accept any non-quote text (handles slashes and other path chars)
-        const rx = /\bt\(\s*(['"`])([^'"`]+?)\1\s*\)/g;
+        // Best-effort regex for t('...') calls; support optional second arg like t('key', {...})
+        const rx = /\bt\(\s*(['"`])([^'"`]+?)\1(?:\s*,[^)]*)?\s*\)/g;
         for (let m = rx.exec(text); m; m = rx.exec(text)) {
             const key = m[2];
             const start = m.index;
@@ -922,19 +943,23 @@ async function activate(context) {
             const inJsxUi = isJsx && isLikelyJsxUiContext(docText, startOffset);
             const inVueAttr = isVue && !!getAttributeContext(docText, startOffset);
             const inJsxAttr = isJsx && !!getJsxAttributeContext(docText, startOffset);
+            const inVueScript = isVue && isInsideVueScript(docText, startOffset);
+            // Generic script contexts: non-Vue non-JSX files, or JSX outside UI/attr
+            const inGenericScript = (!isVue && !isJsx) || (isJsx && !inJsxUi && !inJsxAttr);
             // Missing is determined against the ACTIVE locale file only (no fallback),
             // so removing a key from the active file turns it red immediately.
             const lang = (activePreviewLanguage || projectContext?.baseLanguage);
             const activeDirect = projectContext ? getValueByPath(localeCache[lang], item.key) : undefined;
-            const isMissing = !activeDirect && (inVueTemplate || inJsxUi || inVueAttr || inJsxAttr);
+            const isMissing = !activeDirect && (inVueTemplate || inJsxUi || inVueAttr || inJsxAttr || inVueScript || inGenericScript);
             // If there is no value to show (and not a missing-key case) and we're not in hidden mode, skip rendering
             if (!textToShow && !isMissing && keyMode !== 'hidden')
                 continue;
+            // In hidden mode we want to show only the locale value and hide the original code everywhere
             const hover = new vscode.MarkdownString();
             if (hoverShowsKey)
-                hover.appendMarkdown(`Key: \`${item.key}\``);
+                hover.appendMarkdown(vscode.l10n.t('Key: {0}', `\`${item.key}\``));
             hover.appendMarkdown('\n\n');
-            hover.appendMarkdown(`Value (${activePreviewLanguage}): ${value}`);
+            hover.appendMarkdown(vscode.l10n.t('Value ({0}): {1}', activePreviewLanguage ?? '', String(value ?? '')));
             const leaf = item.key.split('.').pop() || item.key;
             // Key+locale mode should not duplicate the key (code already shows it)
             // Leaf mode shows a compact key prefix; Hidden mode shows only value and hides the code
@@ -949,7 +974,7 @@ async function activate(context) {
                     renderOptions: {
                         // Use `before` to ensure visibility even when the original range is fully hidden
                         before: {
-                            contentText: `${isMissing ? 'Locale Key Missing!!' : textToShow}`,
+                            contentText: `${isMissing ? vscode.l10n.t('Locale Key Missing!!') : textToShow}`,
                             backgroundColor: (isMissing ? 'hsl(0, 70%, 50%)' : previewBg),
                             color: '#ffffff',
                             margin: '0 0 0 0.15em',
@@ -966,7 +991,7 @@ async function activate(context) {
                     hoverMessage: hover,
                     renderOptions: {
                         after: {
-                            contentText: `${keyLabel}${isMissing ? 'Locale Key Missing!!' : textToShow}`,
+                            contentText: `${keyLabel}${isMissing ? vscode.l10n.t('Locale Key Missing!!') : textToShow}`,
                             backgroundColor: (isMissing ? 'hsl(0, 70%, 50%)' : previewBg),
                             color: '#ffffff',
                             margin: '0 0 0 0.15em',
@@ -1125,10 +1150,10 @@ async function activate(context) {
         const enable = cfg.get('enableInlinePreview', true);
         const currentMode = (cfg.get('inlinePreviewKeyMode') || 'hidden');
         const pick = await vscode.window.showQuickPick([
-            { label: 'No preview', description: 'Hide all inline translations', value: 'off' },
-            { label: 'Key + locale preview', description: 'Show full key and translation', value: 'full' },
-            { label: 'Locale only preview', description: 'Show translation only', value: 'hidden' }
-        ], { title: 'Stringer: Change Preview Mode', placeHolder: 'Select inline preview mode' });
+            { label: vscode.l10n.t('No preview'), description: vscode.l10n.t('Hide all inline translations'), value: 'off' },
+            { label: vscode.l10n.t('Key + locale preview'), description: vscode.l10n.t('Show full key and translation'), value: 'full' },
+            { label: vscode.l10n.t('Locale only preview'), description: vscode.l10n.t('Show translation only'), value: 'hidden' }
+        ], { title: vscode.l10n.t('Stringer: Change Preview Mode'), placeHolder: vscode.l10n.t('Select inline preview mode') });
         if (!pick)
             return;
         if (pick.value === 'off') {
@@ -1163,10 +1188,18 @@ async function activate(context) {
                 .map((l) => `<option value="${l}" ${l === currentLang ? 'selected' : ''}>${l}</option>`)
                 .join('');
             const modeOptions = [
-                { v: 'off', l: 'No preview' },
-                { v: 'full', l: 'Key + locale preview' },
-                { v: 'hidden', l: 'Locale only preview' }
+                { v: 'off', l: vscode.l10n.t('No preview') },
+                { v: 'full', l: vscode.l10n.t('Key + locale preview') },
+                { v: 'hidden', l: vscode.l10n.t('Locale only preview') }
             ].map(({ v, l }) => `<option value="${v}" ${((!enable && v === 'off') || (enable && v === keyMode)) ? 'selected' : ''}>${l}</option>`).join('');
+            const lblPreviewMode = vscode.l10n.t('Preview mode:');
+            const lblPreviewLanguage = vscode.l10n.t('Preview language:');
+            const lblReload = vscode.l10n.t('Reload locales');
+            const lblAlign = vscode.l10n.t('Align Translations');
+            const lblCurrent = vscode.l10n.t('Current: {0}', previewLabel);
+            const lblWebsite = vscode.l10n.t('Website');
+            const lblDocs = vscode.l10n.t('Docs');
+            const lblBilling = vscode.l10n.t('Billing');
             const website = 'https://stringer-cli.com';
             const docs = 'https://docs.stringer-cli.com';
             const billing = 'https://stringer-cli.com/billing';
@@ -1188,28 +1221,28 @@ async function activate(context) {
   <title>Stringer</title>
   </head>
 <body>
-  <h2>Stringer Control Panel</h2>
+  <h2>${vscode.l10n.t('Stringer Control Panel')}</h2>
   <div class="group">
     <div class="row">
-      <label>Preview mode:</label>
+      <label>${lblPreviewMode}</label>
       <select id="mode">${modeOptions}</select>
-      <span class="muted">Current: ${previewLabel}</span>
+      <span class="muted">${lblCurrent}</span>
     </div>
     <div class="row">
-      <label>Preview language:</label>
+      <label>${lblPreviewLanguage}</label>
       <select id="lang">${langOptions}</select>
-      <button id="reload">Reload locales</button>
+      <button id="reload">${lblReload}</button>
     </div>
   </div>
   <div class="group">
     <div class="row">
-      <button id="align">Align Translations</button>
+      <button id="align">${lblAlign}</button>
     </div>
   </div>
   <div class="group links">
-    <a href="#" data-link="${website}">Website</a>
-    <a href="#" data-link="${docs}">Docs</a>
-    <a href="#" data-link="${billing}">Billing</a>
+    <a href="#" data-link="${website}">${lblWebsite}</a>
+    <a href="#" data-link="${docs}">${lblDocs}</a>
+    <a href="#" data-link="${billing}">${lblBilling}</a>
   </div>
   <script>
     const vscode = acquireVsCodeApi()
@@ -1788,7 +1821,8 @@ async function activate(context) {
         const firstLine = doc.lineAt(0);
         const langId = doc.languageId;
         const getFileHeaderComment = (languageId) => {
-            if (languageId === 'html' || languageId === 'markdown')
+            // Use HTML-style comments for markup-centric languages and SFCs
+            if (languageId === 'html' || languageId === 'markdown' || languageId === 'mdx' || languageId === 'svelte' || languageId === 'vue')
                 return '<!-- @stringer-ignore -->\n';
             // Default JS/TS style
             return '// @stringer-ignore\n';
@@ -1812,32 +1846,36 @@ async function activate(context) {
     context.subscriptions.push(statusBarItem);
     // Menu command
     const showMenu = vscode.commands.registerCommand('stringer.showMenu', async () => {
-        const pick = await vscode.window.showQuickPick([
+        const items = [
             {
-                label: 'Align Translations',
-                description: 'Add any missing translations for target languages based on your base language JSON file'
+                id: 'align',
+                label: vscode.l10n.t('Align Translations'),
+                description: vscode.l10n.t('Add any missing translations for target languages based on your base language JSON file')
             },
             {
-                label: 'Convert Strings to i18n Keys',
-                description: 'Run "stringer convert" in the integrated terminal for this project'
+                id: 'convert',
+                label: vscode.l10n.t('Convert Strings to i18n Keys'),
+                description: vscode.l10n.t('Run "stringer convert" in the integrated terminal for this project')
             },
             {
-                label: 'Select Locales folder',
-                description: 'Pick the folder that contains your locale *.json files'
+                id: 'select_locales',
+                label: vscode.l10n.t('Select Locales folder'),
+                description: vscode.l10n.t('Pick the folder that contains your locale *.json files')
             },
-            { label: 'Change Preview Language', description: 'Switch inline preview locale' },
-            { label: 'Change Preview Mode', description: 'Switch inline preview content' },
-            { label: 'Change Preview Color', description: 'Set the background color of inline previews (HSL, RGB, or color name)' },
-            { label: 'Open Website', description: 'stringer-cli.com' },
-            { label: 'Open Docs', description: 'docs.stringer-cli.com' },
-            { label: 'Open Billing', description: 'stringer-cli.com/billing' }
-        ], {
+            { id: 'change_lang', label: vscode.l10n.t('Change Preview Language'), description: vscode.l10n.t('Switch inline preview locale') },
+            { id: 'change_mode', label: vscode.l10n.t('Change Preview Mode'), description: vscode.l10n.t('Switch inline preview content') },
+            { id: 'change_color', label: vscode.l10n.t('Change Preview Color'), description: vscode.l10n.t('Set the background color of inline previews (HSL, RGB, or color name)') },
+            { id: 'open_website', label: vscode.l10n.t('Open Website'), description: 'stringer-cli.com' },
+            { id: 'open_docs', label: vscode.l10n.t('Open Docs'), description: 'docs.stringer-cli.com' },
+            { id: 'open_billing', label: vscode.l10n.t('Open Billing'), description: 'stringer-cli.com/billing' }
+        ];
+        const pick = await vscode.window.showQuickPick(items, {
             title: 'Stringer',
-            placeHolder: 'Select an action'
+            placeHolder: vscode.l10n.t('Select an action')
         });
         if (!pick)
             return;
-        if (pick.label === 'Change Preview Color') {
+        if (pick.id === 'change_color') {
             const cfg = vscode.workspace.getConfiguration('stringerHelper');
             const current = cfg.get('previewBackgroundColor') || 'hsl(270, 55%, 43%)';
             const val = await vscode.window.showInputBox({
@@ -1851,7 +1889,7 @@ async function activate(context) {
             }
             return;
         }
-        if (pick.label === 'Align Translations') {
+        if (pick.id === 'align') {
             const workspaceFolders = vscode.workspace.workspaceFolders;
             const folder = vscode.window.activeTextEditor
                 ? vscode.workspace.getWorkspaceFolder(vscode.window.activeTextEditor.document.uri)
@@ -1863,7 +1901,7 @@ async function activate(context) {
             await runAlignInTerminal(folder.uri.fsPath);
             return;
         }
-        if (pick.label === 'Convert Strings to i18n Keys') {
+        if (pick.id === 'convert') {
             const workspaceFolders = vscode.workspace.workspaceFolders;
             const folder = vscode.window.activeTextEditor
                 ? vscode.workspace.getWorkspaceFolder(vscode.window.activeTextEditor.document.uri)
@@ -1875,27 +1913,27 @@ async function activate(context) {
             await runConvertInTerminal(folder.uri.fsPath);
             return;
         }
-        if (pick.label === 'Select Locales folder') {
+        if (pick.id === 'select_locales') {
             await vscode.commands.executeCommand('stringer.changeLocalesFolder');
             return;
         }
-        if (pick.label === 'Change Preview Language') {
+        if (pick.id === 'change_lang') {
             await choosePreviewLanguage();
             return;
         }
-        if (pick.label === 'Change Preview Mode') {
+        if (pick.id === 'change_mode') {
             await vscode.commands.executeCommand('stringer.changePreviewMode');
             return;
         }
-        if (pick.label === 'Open Website') {
+        if (pick.id === 'open_website') {
             vscode.env.openExternal(vscode.Uri.parse('https://stringer-cli.com'));
             return;
         }
-        if (pick.label === 'Open Docs') {
+        if (pick.id === 'open_docs') {
             vscode.env.openExternal(vscode.Uri.parse('https://docs.stringer-cli.com'));
             return;
         }
-        if (pick.label === 'Open Billing') {
+        if (pick.id === 'open_billing') {
             vscode.env.openExternal(vscode.Uri.parse('https://stringer-cli.com/billing'));
             return;
         }

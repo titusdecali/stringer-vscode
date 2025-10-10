@@ -2,6 +2,7 @@
   "extension.displayName": "مساعد Stringer للترجمة الدولية",
   "extension.description": "أضف مفاتيح i18n عبر Stringer من النص المحدد وقم بمحاذاة الترجمات.",
   "command.stringer.addI18nKey.title": "🌐 Stringer: إضافة مفتاح i18n",
-  "command.stringer.restoreStringAndDeleteKey.title": "Stringer: استعادة النص وحذف مفتاح i18n",
-  "command.stringer.revertToOriginalText.title": "🌐 Stringer: الرجوع إلى النص الأصلي"
+  "command.stringer.revertToOriginalText.title": "🌐 Stringer: الرجوع إلى النص الأصلي",
+  "command.stringer.ignoreLine.title": "🌐 Stringer: تجاهل هذا السطر",
+  "command.stringer.ignoreFile.title": "🌐 Stringer: تجاهل هذا الملف"
 }
