@@ -1,14 +1,22 @@
-<div align="center">
+<p align="center">
   <img src="https://c81fz8ovlk.ufs.sh/f/pOylDC1T5WMxOUllPdRtGwJSYT6Bm8zgo9sN2eULKVXRkc4b" alt="Stringer" width="350" />
-  
-  # Stringer i18n Helper
-  
-  **The VS Code companion for [Stringer CLI](https://stringer-cli.com)**
-  
+</p>
+
+<h1 align="center">Stringer i18n Helper</h1>
+
+<p align="center">
+  <b>The VS Code companion for <a href="https://stringer-cli.com">Stringer CLI</a></b>
+</p>
+
+<p align="center">
   Add i18n keys manually • Preview translations inline • Keep locales in sync
-  
-  [Install Extension](https://marketplace.visualstudio.com/items?itemName=titusdecali.stringer-helper) · [Documentation](https://docs.stringer-cli.com) · [Discord](https://discord.gg/hSfeCkej4y)
-</div>
+</p>
+
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=titusdecali.stringer-helper">Install Extension</a> · 
+  <a href="https://docs.stringer-cli.com">Documentation</a> · 
+  <a href="https://discord.gg/hSfeCkej4y">Discord</a>
+</p>
 
 ---
 
@@ -214,6 +222,6 @@ This creates the config file (`~/.stringer-cli.json`) the extension needs.
 
 ---
 
-<div align="center">
+<p align="center">
   Built to work hand-in-hand with <b>Stringer CLI</b> for a smooth i18n workflow. Happy localizing! 🌍
-</div>
+</p>
