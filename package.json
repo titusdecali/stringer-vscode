@@ -2,7 +2,7 @@
   "name": "stringer-helper",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "1.0.8",
+  "version": "1.1.0",
   "publisher": "titusdecali",
   "icon": "images/stringerIcon.png",
   "repository": {
@@ -97,7 +97,7 @@
         {
           "command": "stringer.revertToOriginalText",
           "group": "navigation@9",
-          "when": "stringer.hasI18nKeyAtCursor && resourceExtname =~ /\\.(js|jsx|ts|tsx|vue|svelte|mdx|md)$/"
+          "when": "(stringer.hasI18nKeyAtCursor || stringer.hasI18nKeyOnLine) && resourceExtname =~ /\\.(js|jsx|ts|tsx|vue|svelte|mdx|md)$/"
         },
         {
           "command": "stringer.ignoreLine",
@@ -136,7 +136,7 @@
         },
         "stringerHelper.previewBackgroundColor": {
           "type": "string",
-          "default": "hsl(270, 55%, 43%)",
+          "default": "#4e18b5",
           "description": "Background color for inline preview badges (CSS color or HEX)."
         },
         "stringerHelper.hoverShowsKey": {

@@ -56,11 +56,19 @@ const decorationType = vscode.window.createTextEditorDecorationType({
     rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed
 });
 const hiddenTextDecorationType = vscode.window.createTextEditorDecorationType({
-    // Hide original text when rendering locale-only mode and collapse width
-    textDecoration: 'none; opacity: 0; font-size: 0; letter-spacing: 0;'
+    // Hide original text when rendering locale-only mode but preserve layout width.
+    // Use aggressive CSS so it works in all contexts (objects/JSX/Vue templates).
+    // VS Code allows injecting extra CSS declarations via textDecoration.
+    textDecoration: 'none; opacity: 0 !important; font-size: 0 !important; letter-spacing: -0.5em !important;'
 });
 // Separate decoration type for rendering values with 'before' so it is not affected by hidden style
-const valueBeforeDecorationType = vscode.window.createTextEditorDecorationType({});
+const valueBeforeDecorationType = vscode.window.createTextEditorDecorationType({
+    before: {
+        // Ensure the rendered value participates in layout and is readable on dark/light themes
+        color: new vscode.ThemeColor('editor.foreground'),
+        margin: '0 0 0 0',
+    }
+});
 // Utilities to mirror CLI behavior
 function lastPathSegment(expr) {
     const parts = String(expr).split('.');
@@ -87,6 +95,13 @@ function normalizeSelectedTextForI18n(value) {
     v = stripHtmlTagsPreserveText(v);
     v = normalizeWhitespace(v);
     return v;
+}
+// Truncate preview content safely by Unicode code points (avoid breaking surrogate pairs)
+function truncateForPreview(value, maxLength = 300) {
+    const codepoints = Array.from(String(value));
+    if (codepoints.length <= maxLength)
+        return value;
+    return codepoints.slice(0, maxLength).join('') + '…';
 }
 // Extract placeholder parameter names from a normalized i18n string, e.g. "Hello {name} ({count})" -> ['name','count']
 function extractParamsFromNormalizedText(value) {
@@ -315,8 +330,8 @@ async function runAlignInTerminal(cwd) {
     terminal.sendText('stringer align', true);
 }
 // Run stringer convert in integrated terminal
-    async function runConvertInTerminal(cwd) {
-        const terminal = vscode.window.createTerminal({ name: vscode.l10n.t('Stringer Convert'), cwd });
+async function runConvertInTerminal(cwd) {
+    const terminal = vscode.window.createTerminal({ name: vscode.l10n.t('Stringer Convert'), cwd });
     terminal.show();
     terminal.sendText('stringer convert', true);
 }
@@ -889,6 +904,20 @@ async function activate(context) {
         }
         return null;
     }
+    // Fallback: find first t('...') or <i18n-t keypath="..."> occurring on the given line
+    function getTTupleOnLine(doc, line) {
+        const tuples = findTTupleRanges(doc);
+        for (const t of tuples) {
+            if (t.range.start.line <= line && line <= t.range.end.line)
+                return t;
+        }
+        const attrs = findI18nKeypathRanges(doc);
+        for (const a of attrs) {
+            if (a.range.start.line <= line && line <= a.range.end.line)
+                return { range: a.range, key: a.key };
+        }
+        return null;
+    }
     function escapeHtmlAttr(value) {
         return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
     }
@@ -964,17 +993,36 @@ async function activate(context) {
             // Key+locale mode should not duplicate the key (code already shows it)
             // Leaf mode shows a compact key prefix; Hidden mode shows only value and hides the code
             const keyLabel = keyMode === 'leaf' ? `[${leaf}] ` : '';
+            // Expand preview/hidden range to include surrounding template/JSX braces when applicable
+            let previewRange = item.range;
+            if (inVueTemplate) {
+                const must = findEnclosingMustache(docText, startOffset);
+                if (must) {
+                    previewRange = new vscode.Range(editor.document.positionAt(must.start), editor.document.positionAt(must.end));
+                }
+            }
+            else if (!isVue && isJsx && inJsxUi) {
+                let left = editor.document.offsetAt(item.range.start) - 1;
+                while (left >= 0 && /\s/.test(docText[left]))
+                    left--;
+                let right = editor.document.offsetAt(item.range.end);
+                while (right < docText.length && /\s/.test(docText[right]))
+                    right++;
+                if (docText[left] === '{' && docText[right] === '}') {
+                    previewRange = new vscode.Range(editor.document.positionAt(left), editor.document.positionAt(right + 1));
+                }
+            }
             if (keyMode === 'hidden') {
                 // 1) Hide the original text entirely (collapsed width)
-                hiddenRanges.push({ range: item.range });
+                hiddenRanges.push({ range: previewRange });
                 // 2) Render the value via a separate decoration so opacity does not affect it
                 hiddenModeValueDecorations.push({
-                    range: item.range,
+                    range: previewRange,
                     // Avoid duplicate hover (decoration + provider); provider will handle it
                     renderOptions: {
                         // Use `before` to ensure visibility even when the original range is fully hidden
                         before: {
-                            contentText: `${isMissing ? vscode.l10n.t('Locale Key Missing!!') : textToShow}`,
+                            contentText: `${truncateForPreview(isMissing ? vscode.l10n.t('Locale Key Missing!!') : textToShow)}`,
                             backgroundColor: (isMissing ? 'hsl(0, 70%, 50%)' : previewBg),
                             color: '#ffffff',
                             margin: '0 0 0 0.15em',
@@ -991,7 +1039,7 @@ async function activate(context) {
                     hoverMessage: hover,
                     renderOptions: {
                         after: {
-                            contentText: `${keyLabel}${isMissing ? vscode.l10n.t('Locale Key Missing!!') : textToShow}`,
+                            contentText: `${keyLabel}${truncateForPreview(isMissing ? vscode.l10n.t('Locale Key Missing!!') : textToShow)}`,
                             backgroundColor: (isMissing ? 'hsl(0, 70%, 50%)' : previewBg),
                             color: '#ffffff',
                             margin: '0 0 0 0.15em',
@@ -1333,11 +1381,14 @@ async function activate(context) {
         const ed = editor ?? vscode.window.activeTextEditor;
         if (!ed) {
             await vscode.commands.executeCommand('setContext', 'stringer.hasI18nKeyAtCursor', false);
+            await vscode.commands.executeCommand('setContext', 'stringer.hasI18nKeyOnLine', false);
             return;
         }
         const pos = ed.selection.active;
         const hit = getTTupleAtPosition(ed.document, pos);
         await vscode.commands.executeCommand('setContext', 'stringer.hasI18nKeyAtCursor', !!hit);
+        const lineHit = getTTupleOnLine(ed.document, pos.line);
+        await vscode.commands.executeCommand('setContext', 'stringer.hasI18nKeyOnLine', !!lineHit);
     }
     vscode.window.onDidChangeTextEditorSelection(async () => {
         await updateHasKeyContext();
@@ -1445,7 +1496,20 @@ async function activate(context) {
                     edit.replace(range, `{${expr}}`);
                 }
                 else if (isTplText) {
-                    edit.replace(selection, `{{ ${expr} }}`);
+                    const must = findEnclosingMustache(docText, startOffset);
+                    if (must) {
+                        const strBounds = findEnclosingStringLiteralBounds(docText, startOffset);
+                        if (strBounds) {
+                            const range = new vscode.Range(editor.document.positionAt(strBounds.qStart), editor.document.positionAt(strBounds.qEnd + 1));
+                            edit.replace(range, expr);
+                        }
+                        else {
+                            edit.replace(selection, expr);
+                        }
+                    }
+                    else {
+                        edit.replace(selection, `{{ ${expr} }}`);
+                    }
                 }
                 else if (inJsx && isLikelyJsxUiContext(docText, startOffset)) {
                     // Wrap UI text with JSX expression
@@ -1524,161 +1588,7 @@ async function activate(context) {
             isProcessingCommand = false;
         }
     });
-    const restoreAndDeleteCmd = vscode.commands.registerCommand('stringer.restoreStringAndDeleteKey', async () => {
-        if (isProcessingCommand)
-            return;
-        isProcessingCommand = true;
-        try {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor)
-                return;
-            const doc = editor.document;
-            const pos = editor.selection.active;
-            const hit = getTTupleAtPosition(doc, pos);
-            if (!hit) {
-                vscode.window.showInformationMessage(vscode.l10n.t('Place the cursor inside a t(\'key\') call.'));
-                return;
-            }
-            if (!projectContext) {
-                const ok = await ensureProjectContext(editor);
-                if (!ok || !projectContext)
-                    return;
-            }
-            // Load base locale strictly
-            await preloadLocales();
-            const baseJson = localeCache[projectContext.baseLanguage];
-            const baseValue = getValueByPath(baseJson, hit.key) || getValueByPathLoose(baseJson, hit.key);
-            if (typeof baseValue !== 'string') {
-                vscode.window.showErrorMessage(vscode.l10n.t('Base language value not found for {0}', hit.key));
-                return;
-            }
-            const docText = doc.getText();
-            const startOffset = doc.offsetAt(hit.range.start);
-            const filePath = doc.uri.fsPath;
-            const inVue = isVueFile(filePath);
-            const inJsx = isJsxFile(filePath);
-            const inVueTpl = inVue && isVueTemplateTextNode(docText, startOffset);
-            // Compute replacement range and text according to context
-            let replaceStart = hit.range.start;
-            let replaceEnd = hit.range.end;
-            let replacement = '';
-            if (inVue && inVueTpl) {
-                const must = findEnclosingMustache(docText, startOffset);
-                if (must) {
-                    replaceStart = doc.positionAt(must.start);
-                    replaceEnd = doc.positionAt(must.end);
-                    replacement = baseValue;
-                }
-                else {
-                    replacement = baseValue;
-                }
-            }
-            else if (inVue) {
-                const attrCtx = getAttributeContext(docText, startOffset);
-                if (attrCtx) {
-                    const { name, isBound, attrStart, valueStart, valueEnd } = attrCtx;
-                    if (isBound) {
-                        // Replace entire bound attribute with static value
-                        replaceStart = doc.positionAt(attrStart);
-                        replaceEnd = doc.positionAt(valueEnd + 1);
-                        replacement = `${name}="${escapeHtmlAttr(baseValue)}"`;
-                    }
-                    else {
-                        // Replace quoted value content only
-                        replaceStart = doc.positionAt(valueStart);
-                        replaceEnd = doc.positionAt(valueEnd);
-                        replacement = escapeHtmlAttr(baseValue);
-                    }
-                }
-                else {
-                    replacement = `"${escapeJsString(baseValue, '"')}"`;
-                }
-            }
-            else if (inJsx) {
-                // Detect if wrapped by JSX expression braces
-                let left = startOffset - 1;
-                while (left >= 0 && /\s/.test(docText[left]))
-                    left--;
-                let right = doc.offsetAt(hit.range.end);
-                while (right < docText.length && /\s/.test(docText[right]))
-                    right++;
-                const hasBraces = docText[left] === '{' && docText[right] === '}';
-                // Heuristic: attribute if there is an '=' before the '{' and after last '<'
-                const lastLt = docText.lastIndexOf('<', left);
-                const lastGt = docText.lastIndexOf('>', left);
-                const eq = docText.lastIndexOf('=', left);
-                const inAttribute = eq > lastLt && eq > lastGt;
-                if (hasBraces && inAttribute) {
-                    replaceStart = doc.positionAt(left);
-                    replaceEnd = doc.positionAt(right + 1);
-                    replacement = `"${escapeJsString(baseValue, '"')}"`;
-                }
-                else if (hasBraces && !inAttribute) {
-                    // Text node inside JSX
-                    replaceStart = doc.positionAt(left);
-                    replaceEnd = doc.positionAt(right + 1);
-                    replacement = baseValue;
-                }
-                else if (inAttribute) {
-                    // Already quoted string attribute somehow; just swap inside
-                    replacement = `"${escapeJsString(baseValue, '"')}"`;
-                }
-                else {
-                    // Generic JS expression
-                    replacement = `'${escapeJsString(baseValue, "'")}'`;
-                }
-            }
-            else {
-                // Generic TS/JS file
-                replacement = `'${escapeJsString(baseValue, "'")}'`;
-            }
-            await withEdit(editor, (edit) => {
-                edit.replace(new vscode.Range(replaceStart, replaceEnd), replacement);
-            });
-            // Delete key from all locale files
-            const localesDir = projectContext.localesDir;
-            const parts = hit.key.split('.').filter(Boolean);
-            function deletePath(obj, segs, idx = 0) {
-                if (!obj || typeof obj !== 'object')
-                    return false;
-                const key = segs[idx];
-                if (!(key in obj))
-                    return false;
-                if (idx === segs.length - 1) {
-                    delete obj[key];
-                }
-                else {
-                    const becameEmpty = deletePath(obj[key], segs, idx + 1);
-                    // Prune empty containers
-                    if (becameEmpty)
-                        delete obj[key];
-                }
-                return typeof obj === 'object' && Object.keys(obj).length === 0;
-            }
-            try {
-                const files = fs.readdirSync(localesDir).filter((f) => isLocaleFileName(f));
-                for (const f of files) {
-                    try {
-                        const fp = path.join(localesDir, f);
-                        const json = JSON.parse(fs.readFileSync(fp, 'utf-8'));
-                        deletePath(json, parts);
-                        fs.writeFileSync(fp, JSON.stringify(json, null, 2));
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-            // Refresh preview
-            localeCache = {};
-            await preloadLocales();
-            refreshActiveEditorDecorations();
-            await updateHasKeyContext(editor);
-        }
-        finally {
-            isProcessingCommand = false;
-        }
-    });
-    context.subscriptions.push(restoreAndDeleteCmd);
+    // (Restore and delete key) feature removed
     // Revert only the current t('key') usage to original base-language value (no locale deletion)
     const revertToOriginalCmd = vscode.commands.registerCommand('stringer.revertToOriginalText', async () => {
         const editor = vscode.window.activeTextEditor;
@@ -1686,9 +1596,9 @@ async function activate(context) {
             return;
         const doc = editor.document;
         const pos = editor.selection.active;
-        const hit = getTTupleAtPosition(doc, pos);
+        const hit = getTTupleAtPosition(doc, pos) || getTTupleOnLine(doc, pos.line);
         if (!hit) {
-            vscode.window.showInformationMessage(vscode.l10n.t("Place the cursor inside a t('key') call."));
+            vscode.window.showInformationMessage(vscode.l10n.t("Place the cursor inside or on the same line as a t('key') call."));
             return;
         }
         if (!projectContext) {
@@ -1822,8 +1732,13 @@ async function activate(context) {
         const langId = doc.languageId;
         const getFileHeaderComment = (languageId) => {
             // Use HTML-style comments for markup-centric languages and SFCs
-            if (languageId === 'html' || languageId === 'markdown' || languageId === 'mdx' || languageId === 'svelte' || languageId === 'vue')
+            if (languageId === 'html' ||
+                languageId === 'markdown' ||
+                languageId === 'mdx' ||
+                languageId === 'svelte' ||
+                languageId === 'vue') {
                 return '<!-- @stringer-ignore -->\n';
+            }
             // Default JS/TS style
             return '// @stringer-ignore\n';
         };
@@ -1855,7 +1770,7 @@ async function activate(context) {
             {
                 id: 'convert',
                 label: vscode.l10n.t('Convert Strings to i18n Keys'),
-                description: vscode.l10n.t('Run "stringer convert" in the integrated terminal for this project')
+                description: vscode.l10n.t('Run \"stringer convert\" in the integrated terminal for this project')
             },
             {
                 id: 'select_locales',

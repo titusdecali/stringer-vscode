@@ -21,11 +21,19 @@ const decorationType = vscode.window.createTextEditorDecorationType({
   rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed
 })
 const hiddenTextDecorationType = vscode.window.createTextEditorDecorationType({
-  // Hide original text when rendering locale-only mode and collapse width
-  textDecoration: 'none; opacity: 0; font-size: 0; letter-spacing: 0;'
+  // Hide original text when rendering locale-only mode but preserve layout width.
+  // Use aggressive CSS so it works in all contexts (objects/JSX/Vue templates).
+  // VS Code allows injecting extra CSS declarations via textDecoration.
+  textDecoration: 'none; opacity: 0 !important; font-size: 0 !important; letter-spacing: -0.5em !important;'
 })
 // Separate decoration type for rendering values with 'before' so it is not affected by hidden style
-const valueBeforeDecorationType = vscode.window.createTextEditorDecorationType({})
+const valueBeforeDecorationType = vscode.window.createTextEditorDecorationType({
+  before: {
+    // Ensure the rendered value participates in layout and is readable on dark/light themes
+    color: new vscode.ThemeColor('editor.foreground') as any,
+    margin: '0 0 0 0',
+  }
+})
 
 // Utilities to mirror CLI behavior
 function lastPathSegment(expr: string): string {
@@ -57,6 +65,13 @@ function normalizeSelectedTextForI18n(value: string): string {
   v = stripHtmlTagsPreserveText(v)
   v = normalizeWhitespace(v)
   return v
+}
+
+// Truncate preview content safely by Unicode code points (avoid breaking surrogate pairs)
+function truncateForPreview(value: string, maxLength: number = 300): string {
+  const codepoints = Array.from(String(value))
+  if (codepoints.length <= maxLength) return value
+  return codepoints.slice(0, maxLength).join('') + '…'
 }
 
 // Extract placeholder parameter names from a normalized i18n string, e.g. "Hello {name} ({count})" -> ['name','count']
@@ -872,6 +887,19 @@ export async function activate(context: vscode.ExtensionContext) {
     return null
   }
 
+  // Fallback: find first t('...') or <i18n-t keypath="..."> occurring on the given line
+  function getTTupleOnLine(doc: vscode.TextDocument, line: number): { range: vscode.Range; key: string } | null {
+    const tuples = findTTupleRanges(doc)
+    for (const t of tuples) {
+      if (t.range.start.line <= line && line <= t.range.end.line) return t
+    }
+    const attrs = findI18nKeypathRanges(doc)
+    for (const a of attrs) {
+      if (a.range.start.line <= line && line <= a.range.end.line) return { range: a.range, key: a.key }
+    }
+    return null
+  }
+
   function escapeHtmlAttr(value: string): string {
     return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
   }
@@ -945,17 +973,40 @@ export async function activate(context: vscode.ExtensionContext) {
       // Key+locale mode should not duplicate the key (code already shows it)
       // Leaf mode shows a compact key prefix; Hidden mode shows only value and hides the code
       const keyLabel = keyMode === 'leaf' ? `[${leaf}] ` : ''
+      // Expand preview/hidden range to include surrounding template/JSX braces when applicable
+      let previewRange = item.range
+      if (inVueTemplate) {
+        const must = findEnclosingMustache(docText, startOffset)
+        if (must) {
+          previewRange = new vscode.Range(
+            editor.document.positionAt(must.start),
+            editor.document.positionAt(must.end)
+          )
+        }
+      } else if (!isVue && isJsx && inJsxUi) {
+        let left = editor.document.offsetAt(item.range.start) - 1
+        while (left >= 0 && /\s/.test(docText[left])) left--
+        let right = editor.document.offsetAt(item.range.end)
+        while (right < docText.length && /\s/.test(docText[right])) right++
+        if (docText[left] === '{' && docText[right] === '}') {
+          previewRange = new vscode.Range(
+            editor.document.positionAt(left),
+            editor.document.positionAt(right + 1)
+          )
+        }
+      }
+
       if (keyMode === 'hidden') {
         // 1) Hide the original text entirely (collapsed width)
-        hiddenRanges.push({ range: item.range })
+        hiddenRanges.push({ range: previewRange })
         // 2) Render the value via a separate decoration so opacity does not affect it
         hiddenModeValueDecorations.push({
-          range: item.range,
+          range: previewRange,
           // Avoid duplicate hover (decoration + provider); provider will handle it
           renderOptions: {
             // Use `before` to ensure visibility even when the original range is fully hidden
             before: {
-              contentText: `${isMissing ? vscode.l10n.t('Locale Key Missing!!') : textToShow}`,
+              contentText: `${truncateForPreview(isMissing ? vscode.l10n.t('Locale Key Missing!!') : textToShow)}`,
               backgroundColor: (isMissing ? 'hsl(0, 70%, 50%)' : previewBg) as any,
               color: '#ffffff' as any,
               margin: '0 0 0 0.15em',
@@ -971,7 +1022,7 @@ export async function activate(context: vscode.ExtensionContext) {
           hoverMessage: hover,
           renderOptions: {
             after: {
-              contentText: `${keyLabel}${isMissing ? vscode.l10n.t('Locale Key Missing!!') : textToShow}`,
+              contentText: `${keyLabel}${truncateForPreview(isMissing ? vscode.l10n.t('Locale Key Missing!!') : textToShow)}`,
               backgroundColor: (isMissing ? 'hsl(0, 70%, 50%)' : previewBg) as any,
               color: '#ffffff' as any,
               margin: '0 0 0 0.15em',
@@ -1327,11 +1378,14 @@ export async function activate(context: vscode.ExtensionContext) {
     const ed = editor ?? vscode.window.activeTextEditor
     if (!ed) {
       await vscode.commands.executeCommand('setContext', 'stringer.hasI18nKeyAtCursor', false)
+      await vscode.commands.executeCommand('setContext', 'stringer.hasI18nKeyOnLine', false)
       return
     }
     const pos = ed.selection.active
     const hit = getTTupleAtPosition(ed.document, pos)
     await vscode.commands.executeCommand('setContext', 'stringer.hasI18nKeyAtCursor', !!hit)
+    const lineHit = getTTupleOnLine(ed.document, pos.line)
+    await vscode.commands.executeCommand('setContext', 'stringer.hasI18nKeyOnLine', !!lineHit)
   }
 
   vscode.window.onDidChangeTextEditorSelection(async () => {
@@ -1466,7 +1520,21 @@ export async function activate(context: vscode.ExtensionContext) {
           )
           edit.replace(range, `{${expr}}`)
         } else if (isTplText) {
-          edit.replace(selection, `{{ ${expr} }}`)
+          const must = findEnclosingMustache(docText, startOffset)
+          if (must) {
+            const strBounds = findEnclosingStringLiteralBounds(docText, startOffset)
+            if (strBounds) {
+              const range = new vscode.Range(
+                editor.document.positionAt(strBounds.qStart),
+                editor.document.positionAt(strBounds.qEnd + 1)
+              )
+              edit.replace(range, expr)
+            } else {
+              edit.replace(selection, expr)
+            }
+          } else {
+            edit.replace(selection, `{{ ${expr} }}`)
+          }
         } else if (inJsx && isLikelyJsxUiContext(docText, startOffset)) {
           // Wrap UI text with JSX expression
           edit.replace(selection, `{${expr}}`)
@@ -1553,9 +1621,9 @@ export async function activate(context: vscode.ExtensionContext) {
     if (!editor) return
     const doc = editor.document
     const pos = editor.selection.active
-    const hit = getTTupleAtPosition(doc, pos)
+    const hit = getTTupleAtPosition(doc, pos) || getTTupleOnLine(doc, pos.line)
     if (!hit) {
-      vscode.window.showInformationMessage(vscode.l10n.t("Place the cursor inside a t('key') call."))
+      vscode.window.showInformationMessage(vscode.l10n.t("Place the cursor inside or on the same line as a t('key') call."))
       return
     }
     if (!projectContext) {

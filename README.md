@@ -1,152 +1,219 @@
-<div align="center" style="font-weight: bold; margin-top: 10px; margin-bottom: 10px; font-size: 2em;">
-Stringer i18n Helper (VS Code Extension)
-</div>
-
-<div align="center" style="font-weight: bold; margin-top: 10px; margin-bottom: 10px;">
-This extension is a companion to the Stringer CLI.
-</div>
-
-<!-- Beta banner removed: now supports Vue, Nuxt, React, and Next.js -->
-
-<div align="center" style="background: linear-gradient(90deg, #FF4794 0%, #FF7700 100%); color: #fff; padding: 12px 0; border-radius: 7px; font-weight: bold; font-size: 1.1em;">
-  You must run the Stringer CLI in your project folder at least once to use this extension.
-</div>
-
-<div align="center" style="font-weight: bold; margin-top: 10px;">
-  Install and try the CLI for free at: <a href="https://stringer-cli.com" target="_blank">https://stringer-cli.com</a>.
-</div>
-
-<div align="center" style="margin: 30px 0 30px 0;">
-If <b>Stringer CLI</b>'s AI model struggles to translate a string in your project, <br>this extension provides a fast way to add new internationalization (i18n) keys.<br>
-It then helps you synchronize translations across all your language files with these new keys.
-</div>
-
 <div align="center">
-  <img src="https://c81fz8ovlk.ufs.sh/f/pOylDC1T5WMxOUllPdRtGwJSYT6Bm8zgo9sN2eULKVXRkc4b" alt="Stringer CLI" width="400" />
-
-  **Effortless i18n for modern web apps**
+  <img src="https://c81fz8ovlk.ufs.sh/f/pOylDC1T5WMxOUllPdRtGwJSYT6Bm8zgo9sN2eULKVXRkc4b" alt="Stringer" width="350" />
   
-  Transform your codebase into a globally-ready application with intelligent string extraction, seamless translation workflows, and framework-specific optimizations.
+  # Stringer i18n Helper
   
-  [🚀 Get Started](https://stringer-cli.com) • [📚 Documentation](https://docs.stringer-cli.com) • [💬 Join our Discord](https://discord.gg/hSfeCkej4y)
+  **The VS Code companion for [Stringer CLI](https://stringer-cli.com)**
+  
+  Add i18n keys manually • Preview translations inline • Keep locales in sync
+  
+  [Install Extension](https://marketplace.visualstudio.com/items?itemName=titusdecali.stringer-helper) · [Documentation](https://docs.stringer-cli.com) · [Discord](https://discord.gg/hSfeCkej4y)
 </div>
-
-> What is Stringer CLI?
->
-> Stringer CLI is a powerful developer tool that automates adding multilingual support in modern
-> web frameworks (Vue, Nuxt, React, Next). It extracts user‑visible strings, converts them to
-> i18n calls, generates your locale files, and translates them to 40+ target languages.
-
-## Why this helper?
-
-Automations are great, but real projects always have a few tricky strings that are hard to
-convert automatically — maybe they live in unusual code paths, sit inside framework‑specific
-APIs, or were simply ambiguous enough that the CLI chose to play it safe. This helper is
-built for those moments: quickly add the exact strings you want to your i18n system with
-surgical precision, right where you’re working.
-
-In plain terms: if there’s a string you know should be part of your i18n, but the CLI didn’t
-convert it automatically, select it and run the helper. It will add the string to your base
-language file with a unique key and replace the source with the correct i18n call — context‑aware.
-
-Then, simply click the `Stringer` button in the bottom status bar of your VSCode / Cursor window to open the Stringer menu.
-From there, you can trigger the `Align Translations` command to align any other locale files to your base language file via the Stringer CLI.
 
 ---
 
-## What this extension does
+## Quick Start
 
-- Adds a context menu action: **"🌎 Add i18n key via Stringer"**
-- Writes the selected text into your base language JSON using a globally unique 4‑digit leaf key
-- Replaces the selection in your source file with the correct i18n call
-- Detects context and applies the right syntax:
-  - Vue/Nuxt: templates, attributes, script literals
-  - React/Next: JSX text nodes, JSX attribute values, and string literals
-- Offers a quick, non‑blocking prompt to align other locale files (only when targets exist)
-- Provides a status bar button to open a small Stringer menu (align, website, docs, billing)
-- Shows inline translation previews for `t('key.path')` calls using your project locales
-- Hover over a `t('key.path')` call to see the original i18n key and current value
-- Change the active preview language from the status bar or command palette
-- Multiple inline preview modes: Key + locale preview, or Locale-only preview that overlays the translated value
-- Highlights missing keys in the active preview language (in Vue templates) with a red inline indicator so you can fix alignment fast
+1. Install [Stringer CLI](https://stringer-cli.com) and run `stringer convert` in your project
+2. Install this extension
+3. Start using the features below
 
-## Usage
+> **Note:** You must run Stringer CLI at least once to create the config file this extension needs.
 
-1) Ensure you’ve run the Stringer CLI at least once in your project folder, including running the stringer `convert` flow.
-2) Select user‑visible text in your source file.
-3) Right‑click → **"🌎 Add i18n key via Stringer"**.
-4) The extension:
-   - Adds the string to `<outputDir>/<baseLanguage>.json` under a unique 4‑digit key
-   - Replaces your selection with a context‑appropriate call (`t(...)`, `{{ t(...) }}`, or `:attr="t(...)"`)
-   - Injects `const { t } = useI18n()` into .vue files if needed
-   - Shows a non‑blocking align suggestion if other locale files exist
+---
 
-### Inline translation preview
+## Features
 
-- Open a `.vue`, `.jsx`, or `.tsx` file that contains `t('...')` calls.
-- The extension reads your Stringer CLI config from `~/.stringer-cli.json` (matching your open workspace) to find `outputDir` and `baseLanguage`, then loads locale JSON files.
-- It displays an inline preview of the resolved translation after each `t('key.path')` call.
-- Hover on a `t('...')` call to see the original key and the current language value.
+### 1. Add i18n Keys Manually
 
-### Preview modes
+When Stringer CLI misses a string (it happens!), add it yourself in seconds.
 
-- <b>Key + locale preview</b>: Shows the full key plus the translated value next to the call.
-- <b>Locale-only preview</b>: Hides the original `t('...')` code visually and overlays just the translated value inline for a clean reading view.
-- <b>Off</b>: No inline preview decorations are shown.
+**How to use:**
+1. Select any text in your code
+2. Right-click → **"🌎 Add i18n key via Stringer"**
 
-You can switch modes from:
+**Before:**
+```vue
+<template>
+  <h1>Welcome to our app</h1>
+</template>
+```
 
-- Status bar: click the “Preview” eye → select a mode.
-- Command palette: run `Stringer: Change Preview Mode`.
-- Control Panel: run `Stringer: Open Control Panel` and change the mode there.
+**After:**
+```vue
+<template>
+  <h1>{{ t('components.header.0242') }}</h1>
+</template>
+```
 
-### Change preview language
+Keys use the format `keyPath.4-digit-code` where `keyPath` is based on your file path (e.g., `components/Header.vue` → `components.header`).
 
-- Click the “Lang” globe in the status bar → select a locale; or
-- Run command: `Stringer: Change Preview Language`.
+The extension automatically:
+- Adds the string to your base locale file (`en.json`)
+- Replaces the text with the correct `t()` call
+- Injects `const { t } = useI18n()` if needed (Vue/Nuxt)
+- Detects context (template, attribute, script) and uses the right syntax
 
-By default, the preview language is your configured `baseLanguage`. You can set a persistent default in settings.
+---
 
-### Missing key highlighting
+### 2. Inline Translation Previews
 
-- When the active preview language is missing a key used inside Vue template text or JSX UI contexts, the inline preview shows a red indicator with “Locale Key Missing!!”.
-- This is a strong signal that your target locales are out of sync with the base language.
-- Fix it by running alignment: click the status bar “Stringer” button → pick “Align Translations”, or run `stringer align` in your terminal.
+See translations directly in your code without switching files.
 
-### Control Panel
+**What you see:**
+```vue
+<h1>{{ t('components.header.0242') }}</h1>  <!-- "Welcome to our app" -->
+```
 
-- Open with `Stringer: Open Control Panel`.
-- Change preview mode and preview language, reload locales, and open quick links for the website, docs, and billing.
+**Preview modes:**
 
-### Settings
+| Mode | What it shows |
+|------|---------------|
+| **Text only** | Just the translated text |
+| **Key + text** | Both the key and translation |
+| **Off** | No previews |
 
-- `stringerHelper.enableInlinePreview` (boolean, default `true`): toggle inline previews on/off.
-- `stringerHelper.defaultPreviewLanguage` (string, default empty): set a preferred preview language code. If empty, falls back to `baseLanguage` from your CLI config.
-- `stringerHelper.inlinePreviewKeyMode` (string, default `hidden`): choose the preview content. Supported values: `full` (key + text), `hidden` (text only).
-- `stringerHelper.hoverShowsKey` (boolean, default `true`): show the i18n key in hover tooltips.
-- `stringerHelper.autoAlignAfterAdd` (boolean, default `false`): when adding a new key via the command, automatically trigger `stringer align` if other locale files exist.
-- `stringerHelper.framework` (string, default `auto`): tailor add‑key injection for `vue`, `react`, or `next`. When `auto`, the extension detects frameworks from package.json.
-- `stringerHelper.reactInjection` (string, default `react-i18next`): choose React t() source (`react-i18next`) or disable injection.
-- `stringerHelper.nextInjection` (string, default `next-intl`): choose Next.js t() source (`next-intl`) or disable injection.
-- `stringerHelper.cliConfigPath` (string): optional absolute override to `.stringer-cli.json` when auto-detection fails (useful on Windows/WSL).
+**Change the mode:**
+- Click the **eye icon** in the status bar
+- Or run: `Stringer: Change Preview Mode`
 
-Notes:
-- Make sure you’ve run any Stringer CLI flow at least once so `~/.stringer-cli.json` exists and your project is registered.
-- Locale changes are watched live; edits to `<outputDir>/*.json` refresh previews automatically.
+---
+
+### 3. Switch Preview Language
+
+Preview your app in any language without changing your locale settings.
+
+**How to use:**
+- Click the **globe icon** in the status bar
+- Select a language (e.g., Spanish, French, Japanese)
+
+```vue
+<!-- Previewing in Spanish -->
+<h1>{{ t('components.header.0242') }}</h1>  <!-- "Bienvenido a nuestra app" -->
+```
+
+---
+
+### 4. Missing Key Detection
+
+Spot missing translations instantly with red indicators.
+
+```vue
+<!-- When a key is missing in Spanish -->
+<p>{{ t('pages.home.8835') }}</p>  <!-- ⚠️ Locale Key Missing!! -->
+```
+
+**Fix it:** Run `Stringer: Align Translations` or `stringer align` in terminal.
+
+---
+
+### 5. Align Translations
+
+Keep all your locale files in sync with one click.
+
+**How to use:**
+1. Click **"Stringer"** in the status bar
+2. Select **"Align Translations"**
+
+This runs `stringer align` which copies new keys from your base language to all other locales.
+
+---
+
+### 6. Revert to Original Text
+
+Changed your mind? Revert an i18n key back to the original text.
+
+**How to use:**
+1. Place your cursor on a `t('...')` call
+2. Right-click → **"↩️ Revert to original text"**
+
+**Before:**
+```vue
+<h1>{{ t('components.header.0242') }}</h1>
+```
+
+**After:**
+```vue
+<h1>Welcome to our app</h1>
+```
+
+---
+
+### 7. Ignore Lines or Files
+
+Tell Stringer CLI to skip specific code.
+
+**Right-click menu options:**
+- **"🚫 Ignore this line"** — Adds `// @stringer-ignore-next-line` above the current line
+- **"🚫 Ignore this file"** — Adds `// @stringer-ignore` at the top of the file
+
+---
+
+## Status Bar
+
+The extension adds helpful buttons to your status bar:
+
+| Button | What it does |
+|--------|--------------|
+| **Stringer** | Opens the main menu (align, docs, billing) |
+| **👁 Preview** | Change preview mode |
+| **🌐 Lang** | Change preview language |
+
+---
+
+## Supported Frameworks
+
+| Framework | Injection Style |
+|-----------|-----------------|
+| Vue / Nuxt | `const { t } = useI18n()` |
+| React | `import { useTranslation } from 'react-i18next'` |
+| Next.js | `import { useTranslations } from 'next-intl'` |
+
+---
+
+## Settings
+
+Open VS Code settings and search for "Stringer" to customize:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `enableInlinePreview` | `true` | Show inline translation previews |
+| `defaultPreviewLanguage` | `""` | Default language for previews |
+| `inlinePreviewKeyMode` | `hidden` | Preview style: `hidden`, `full`, or `leaf` |
+| `previewBackgroundColor` | `hsl(270, 55%, 43%)` | Badge background color |
+| `autoAlignAfterAdd` | `false` | Auto-run align after adding a key |
+| `framework` | `auto` | Force framework: `auto`, `vue`, `react`, `next` |
+
+---
 
 ## Troubleshooting
 
-- **"Stringer CLI config not found"**
-  - Run any Stringer CLI command (e.g., `stringer help`) from the project root to create/update `~/.stringer-cli.json`
-  - Confirm the `projectName`/`projectPath` match your open folder
+### "Stringer CLI config not found"
 
-## Learn more
+Run any Stringer CLI command first:
+```bash
+stringer
+```
 
-- Website: `https://stringer-cli.com`
-- Docs: `https://docs.stringer-cli.com`
-- Billing: `https://stringer-cli.com/billing`
+This creates the config file (`~/.stringer-cli.json`) the extension needs.
+
+### Previews not showing
+
+1. Check that your locale files exist in the configured `outputDir`
+2. Run `Stringer: Reload Locales` from the command palette
+3. Make sure `enableInlinePreview` is `true` in settings
 
 ---
 
-Built to work hand‑in‑hand with the **Stringer CLI** for a smooth, delightful i18n
-workflow right inside VS Code. Happy localizing! 🌍
+## Links
+
+- **Website:** [stringer-cli.com](https://stringer-cli.com)
+- **Docs:** [docs.stringer-cli.com](https://docs.stringer-cli.com)
+- **Discord:** [Join our community](https://discord.gg/hSfeCkej4y)
+- **Billing:** [stringer-cli.com/billing](https://stringer-cli.com/billing)
+
+---
+
+<div align="center">
+  Built to work hand-in-hand with <b>Stringer CLI</b> for a smooth i18n workflow. Happy localizing! 🌍
+</div>
