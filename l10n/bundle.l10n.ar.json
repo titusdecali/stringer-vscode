@@ -7,5 +7,5 @@
   "dialog.align.question": "ترجماتك غير متسقة. هل تريد تشغيل \"{0}\" لإضافة الترجمات المفقودة؟",
   "common.yes": "نعم",
   "common.no": "لا",
-  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
+  "msg.select.locales.folder": "اختر مجلد اللغات i18n. يمكنك اختياره لاحقًا من قائمة 🌐Stringer في الزاوية السفلية اليمنى من IDE"
 }

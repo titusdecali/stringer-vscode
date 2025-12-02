@@ -7,5 +7,5 @@
   "dialog.align.question": "您的翻譯未對齊。是否執行 \"{0}\" 來新增缺少的翻譯？",
   "common.yes": "是",
   "common.no": "否",
-  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
+  "msg.select.locales.folder": "選取您的 i18n 語言資料夾。您可以稍後在 IDE 右下角的 🌐Stringer 選單中選取"
 }

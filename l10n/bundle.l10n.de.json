@@ -7,5 +7,5 @@
   "dialog.align.question": "Ihre Übersetzungen sind nicht ausgerichtet. \"{0}\" ausführen, um fehlende Übersetzungen hinzuzufügen?",
   "common.yes": "Ja",
   "common.no": "Nein",
-  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
+  "msg.select.locales.folder": "Wählen Sie Ihren i18n-Lokalisierungsordner. Sie können ihn später im 🌐Stringer-Menü unten rechts in Ihrer IDE auswählen"
 }

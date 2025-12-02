@@ -1,0 +1,15 @@
+{
+  "extension.displayName": "Stringer i18n 도우미",
+  "extension.description": "Stringer CLI 동반 확장: 인라인 번역 미리보기 및 한 번의 클릭으로 i18n 키 추가",
+  "command.stringer.addI18nKey.title": "🌐 Stringer: i18n 키 추가",
+  "command.stringer.revertToOriginalText.title": "🌐 Stringer: 원본 텍스트로 되돌리기",
+  "command.stringer.ignoreLine.title": "🌐 Stringer: 이 줄 무시",
+  "command.stringer.ignoreFile.title": "🌐 Stringer: 이 파일 무시",
+  "command.stringer.showMenu.title": "Stringer: 메뉴 열기",
+  "command.stringer.changePreviewLanguage.title": "🌐 Stringer: 미리보기 언어 변경",
+  "command.stringer.changeLocalesFolder.title": "🌐 Stringer: 로케일 폴더 선택",
+  "command.stringer.toggleInlinePreview.title": "🌐 Stringer: 인라인 번역 미리보기 전환",
+  "command.stringer.changePreviewMode.title": "🌐 Stringer: 미리보기 모드 변경",
+  "command.stringer.openControlPanel.title": "🌐 Stringer: 제어판 열기",
+  "command.stringer.reloadLocales.title": "🌐 Stringer: 로케일 다시 로드"
+}

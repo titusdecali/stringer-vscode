@@ -1,6 +1,6 @@
 {
   "extension.displayName": "Stringer i18n Helper",
-  "extension.description": "Add i18n keys via Stringer from selected text and align translations.",
+  "extension.description": "Campanion extension for Stringer CLI: Preview translations inline and add i18n keys with one click",
   "command.stringer.addI18nKey.title": "🌐 Stringer: Add i18n key",
   "command.stringer.revertToOriginalText.title": "🌐 Stringer: Revert to Original Text",
   "command.stringer.ignoreLine.title": "🌐 Stringer: Ignore this line",

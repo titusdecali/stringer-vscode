@@ -7,5 +7,5 @@
   "dialog.align.question": "Ваши переводы не выровнены. Запустить \"{0}\", чтобы добавить отсутствующие переводы?",
   "common.yes": "Да",
   "common.no": "Нет",
-  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
+  "msg.select.locales.folder": "Выберите папку локалей i18n. Вы можете выбрать её позже в меню 🌐Stringer в правом нижнем углу IDE"
 }

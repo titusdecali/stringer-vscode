@@ -112,6 +112,347 @@ function extractParamsFromNormalizedText(value) {
     }
     return Array.from(params);
 }
+/** Extract a clean parameter name from an expression */
+function extractParamName(expr) {
+    const cleaned = expr.trim();
+    // Handle method calls like user.getName() -> user
+    const methodMatch = cleaned.match(/^([A-Za-z_$][A-Za-z0-9_$]*)(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*/);
+    if (methodMatch) {
+        const parts = methodMatch[0].split('.');
+        // Use the last meaningful identifier before method call
+        const lastPart = parts[parts.length - 1];
+        // If it looks like a getter (getName, getCount), extract the noun
+        const getterMatch = lastPart.match(/^get([A-Z][a-z]+)$/);
+        if (getterMatch) {
+            return getterMatch[1].toLowerCase();
+        }
+        return lastPart;
+    }
+    // Fallback: extract first identifier
+    const idMatch = cleaned.match(/([A-Za-z_$][A-Za-z0-9_$]*)/);
+    return idMatch ? idMatch[1] : 'value';
+}
+/** Detect if expression involves number formatting */
+function isNumberFormatting(expr) {
+    return /\.toFixed\s*\(/.test(expr) ||
+        /\.toLocaleString\s*\(/.test(expr) ||
+        /\.toPrecision\s*\(/.test(expr) ||
+        /Number\s*\(/.test(expr) ||
+        /parseFloat\s*\(/.test(expr) ||
+        /parseInt\s*\(/.test(expr);
+}
+/** Detect if expression involves currency formatting */
+function isCurrencyFormatting(expr) {
+    return /['"]currency['"]/.test(expr) ||
+        /style:\s*['"]currency['"]/.test(expr) ||
+        /formatCurrency/.test(expr) ||
+        /\$\s*\+/.test(expr) ||
+        /['"]USD['"]|['"]EUR['"]|['"]GBP['"]/.test(expr);
+}
+/** Detect if expression involves date formatting */
+function isDateFormatting(expr) {
+    return /\.toLocaleDateString\s*\(/.test(expr) ||
+        /\.toLocaleTimeString\s*\(/.test(expr) ||
+        /\.toISOString\s*\(/.test(expr) ||
+        /\.toDateString\s*\(/.test(expr) ||
+        /formatDate/.test(expr) ||
+        /new Date\s*\(/.test(expr) ||
+        /dayjs|moment|date-fns/.test(expr);
+}
+/** Parse a template literal and extract interpolations */
+function parseTemplateLiteral(text) {
+    const params = [];
+    const originalParams = new Map();
+    let normalizedText = '';
+    let lastIndex = 0;
+    let hasAdvanced = false;
+    // Match ${...} patterns, handling nested braces
+    const regex = /\$\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        const expr = match[1].trim();
+        const paramName = extractParamName(expr);
+        // Add text before this match
+        normalizedText += text.slice(lastIndex, match.index);
+        // Determine the type of dynamic value
+        let type = 'interpolation';
+        if (isNumberFormatting(expr)) {
+            type = 'number';
+            hasAdvanced = true;
+        }
+        else if (isCurrencyFormatting(expr)) {
+            type = 'currency';
+            hasAdvanced = true;
+        }
+        else if (isDateFormatting(expr)) {
+            type = 'date';
+            hasAdvanced = true;
+        }
+        else if (/\(.*\)/.test(expr)) {
+            type = 'method';
+            hasAdvanced = true;
+        }
+        // Ensure unique param names
+        let uniqueName = paramName;
+        let counter = 1;
+        while (originalParams.has(uniqueName) && originalParams.get(uniqueName) !== expr) {
+            uniqueName = `${paramName}${counter++}`;
+        }
+        params.push({
+            type,
+            original: match[0],
+            paramName: uniqueName,
+            expression: expr,
+            start: match.index,
+            end: match.index + match[0].length
+        });
+        originalParams.set(uniqueName, expr);
+        normalizedText += `{${uniqueName}}`;
+        lastIndex = match.index + match[0].length;
+    }
+    normalizedText += text.slice(lastIndex);
+    return {
+        normalizedText,
+        params,
+        originalParams,
+        hasAdvancedPatterns: hasAdvanced
+    };
+}
+/** Parse string concatenation: 'Hello ' + name + '!' */
+function parseStringConcatenation(text) {
+    // Check if this looks like concatenation
+    if (!text.includes('+'))
+        return null;
+    const params = [];
+    const originalParams = new Map();
+    let normalizedText = '';
+    let hasAdvanced = false;
+    // Split by + but preserve quoted strings
+    const parts = [];
+    let current = '';
+    let inString = null;
+    let depth = 0;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        const prev = i > 0 ? text[i - 1] : '';
+        if (!inString && (ch === '"' || ch === "'" || ch === '`')) {
+            inString = ch;
+            current += ch;
+        }
+        else if (inString === ch && prev !== '\\') {
+            inString = null;
+            current += ch;
+        }
+        else if (!inString && ch === '(') {
+            depth++;
+            current += ch;
+        }
+        else if (!inString && ch === ')') {
+            depth--;
+            current += ch;
+        }
+        else if (!inString && depth === 0 && ch === '+') {
+            parts.push(current.trim());
+            current = '';
+        }
+        else {
+            current += ch;
+        }
+    }
+    if (current.trim()) {
+        parts.push(current.trim());
+    }
+    // Need at least 2 parts for concatenation
+    if (parts.length < 2)
+        return null;
+    // Check if at least one part is a string literal and one is a variable
+    let hasStringLiteral = false;
+    let hasVariable = false;
+    for (const part of parts) {
+        if (/^['"`].*['"`]$/.test(part)) {
+            hasStringLiteral = true;
+        }
+        else if (/^[A-Za-z_$]/.test(part)) {
+            hasVariable = true;
+        }
+    }
+    if (!hasStringLiteral || !hasVariable)
+        return null;
+    // Build normalized text
+    let paramIndex = 0;
+    for (const part of parts) {
+        const trimmed = part.trim();
+        if (/^['"`](.*?)['"`]$/.test(trimmed)) {
+            // String literal - extract content
+            const content = trimmed.slice(1, -1);
+            normalizedText += content;
+        }
+        else if (trimmed) {
+            // Variable or expression
+            const paramName = extractParamName(trimmed);
+            let uniqueName = paramName;
+            let counter = 1;
+            while (originalParams.has(uniqueName) && originalParams.get(uniqueName) !== trimmed) {
+                uniqueName = `${paramName}${counter++}`;
+            }
+            let type = 'concat';
+            if (isNumberFormatting(trimmed)) {
+                type = 'number';
+                hasAdvanced = true;
+            }
+            else if (isCurrencyFormatting(trimmed)) {
+                type = 'currency';
+                hasAdvanced = true;
+            }
+            else if (isDateFormatting(trimmed)) {
+                type = 'date';
+                hasAdvanced = true;
+            }
+            params.push({
+                type,
+                original: trimmed,
+                paramName: uniqueName,
+                expression: trimmed,
+                start: paramIndex,
+                end: paramIndex + trimmed.length
+            });
+            originalParams.set(uniqueName, trimmed);
+            normalizedText += `{${uniqueName}}`;
+            paramIndex++;
+        }
+    }
+    return {
+        normalizedText: normalizedText.trim(),
+        params,
+        originalParams,
+        hasAdvancedPatterns: hasAdvanced || params.length > 0
+    };
+}
+/** Detect ternary expressions: condition ? 'yes' : 'no' */
+function detectTernaryExpression(text) {
+    const ternaryMatch = text.match(/^([^?]+)\s*\?\s*(['"`]?)([^:'"]+)\2\s*:\s*(['"`]?)([^'"]+)\4$/);
+    if (ternaryMatch) {
+        return {
+            isTernary: true,
+            condition: ternaryMatch[1].trim(),
+            trueVal: ternaryMatch[3].trim(),
+            falseVal: ternaryMatch[5].trim()
+        };
+    }
+    return { isTernary: false };
+}
+/** Main advanced normalization function */
+function advancedNormalizeString(rawText, context) {
+    let text = rawText.trim();
+    // Remove surrounding quotes if present
+    if (/^['"`]/.test(text) && /['"`]$/.test(text)) {
+        const quote = text[0];
+        if (text[text.length - 1] === quote) {
+            text = text.slice(1, -1);
+        }
+    }
+    // Check for template literal (backticks)
+    if (rawText.trim().startsWith('`') || text.includes('${')) {
+        const result = parseTemplateLiteral(text);
+        if (result.params.length > 0) {
+            // Also apply basic normalization
+            result.normalizedText = stripHtmlTagsPreserveText(result.normalizedText);
+            result.normalizedText = normalizeWhitespace(result.normalizedText);
+            return result;
+        }
+    }
+    // Check for string concatenation
+    const concatResult = parseStringConcatenation(rawText);
+    if (concatResult && concatResult.params.length > 0) {
+        concatResult.normalizedText = stripHtmlTagsPreserveText(concatResult.normalizedText);
+        concatResult.normalizedText = normalizeWhitespace(concatResult.normalizedText);
+        return concatResult;
+    }
+    // Check for Vue mustache syntax
+    if (context === 'vue-template' && /\{\{.*\}\}/.test(text)) {
+        const params = [];
+        const originalParams = new Map();
+        let normalized = text;
+        const mustacheRegex = /\{\{\s*([^}]+)\s*\}\}/g;
+        let match;
+        while ((match = mustacheRegex.exec(text)) !== null) {
+            const expr = match[1].trim();
+            const paramName = extractParamName(expr);
+            let uniqueName = paramName;
+            let counter = 1;
+            while (originalParams.has(uniqueName) && originalParams.get(uniqueName) !== expr) {
+                uniqueName = `${paramName}${counter++}`;
+            }
+            params.push({
+                type: 'interpolation',
+                original: match[0],
+                paramName: uniqueName,
+                expression: expr,
+                start: match.index,
+                end: match.index + match[0].length
+            });
+            originalParams.set(uniqueName, expr);
+            normalized = normalized.replace(match[0], `{${uniqueName}}`);
+        }
+        return {
+            normalizedText: normalizeWhitespace(stripHtmlTagsPreserveText(normalized)),
+            params,
+            originalParams,
+            hasAdvancedPatterns: params.length > 0
+        };
+    }
+    // Fallback to basic normalization
+    const basicNormalized = normalizeSelectedTextForI18n(text);
+    const basicParams = extractParamsFromNormalizedText(basicNormalized);
+    const originalParams = new Map();
+    // Try to map extracted params back to original expressions
+    for (const param of basicParams) {
+        // Look for the param in the original text
+        const paramRegex = new RegExp(`\\$\\{\\s*(${param}[^}]*)\\s*\\}|\\{\\{\\s*(${param}[^}]*)\\s*\\}\\}`, 'g');
+        const paramMatch = paramRegex.exec(rawText);
+        if (paramMatch) {
+            originalParams.set(param, paramMatch[1] || paramMatch[2] || param);
+        }
+        else {
+            originalParams.set(param, param);
+        }
+    }
+    return {
+        normalizedText: basicNormalized,
+        params: basicParams.map((p, i) => ({
+            type: 'interpolation',
+            original: p,
+            paramName: p,
+            expression: originalParams.get(p) || p,
+            start: i,
+            end: i + 1
+        })),
+        originalParams,
+        hasAdvancedPatterns: false
+    };
+}
+/** Generate the t() call expression with proper parameter object */
+function generateTCallExpression(keyPath, result) {
+    if (result.params.length === 0) {
+        return `t('${keyPath}')`;
+    }
+    // Build parameter object
+    const paramEntries = [];
+    for (const param of result.params) {
+        const expr = result.originalParams.get(param.paramName) || param.expression;
+        // If the expression is the same as param name, use shorthand
+        if (expr === param.paramName) {
+            paramEntries.push(param.paramName);
+        }
+        else {
+            paramEntries.push(`${param.paramName}: ${expr}`);
+        }
+    }
+    return `t('${keyPath}', { ${paramEntries.join(', ')} })`;
+}
+// ============================================================================
+// END ADVANCED STRING CONVERSION SYSTEM
+// ============================================================================
 function isWsl() {
     try {
         if (process.platform !== 'linux')
@@ -1425,8 +1766,20 @@ async function activate(context) {
                 return;
             }
             const selectedText = editor.document.getText(selection);
-            const selectedString = normalizeSelectedTextForI18n(selectedText.replace(/^['"`]/, '').replace(/['"`]$/, '').trim());
-            const params = extractParamsFromNormalizedText(selectedString);
+            const filePath = editor.document.uri.fsPath;
+            const docText = editor.document.getText();
+            const startOffset = editor.document.offsetAt(selection.start);
+            const inVue = isVueFile(filePath);
+            const inJsx = isJsxFile(filePath);
+            const isTplText = inVue && isVueTemplateTextNode(docText, startOffset);
+            // Determine context for advanced normalization
+            const normContext = isTplText ? 'vue-template' :
+                inJsx ? 'jsx' :
+                    'script';
+            // Use advanced normalization to detect dynamic values
+            const advancedResult = advancedNormalizeString(selectedText, normContext);
+            const selectedString = advancedResult.normalizedText;
+            const params = advancedResult.params;
             const workspaceFolders = vscode.workspace.workspaceFolders;
             const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri) || (workspaceFolders && workspaceFolders[0]);
             if (!folder) {
@@ -1459,7 +1812,6 @@ async function activate(context) {
                 vscode.window.showErrorMessage(vscode.l10n.t('Base language file has invalid JSON. Please fix it and try again. No changes were made.'));
                 return;
             }
-            const filePath = editor.document.uri.fsPath;
             const keyPathPrefix = generateKeyPath(filePath, projectRoot);
             if (!keyPathPrefix) {
                 vscode.window.showErrorMessage(vscode.l10n.t('Cannot derive key path from file location.'));
@@ -1467,15 +1819,10 @@ async function activate(context) {
             }
             const { updated, fullKeyPath } = addStringToBaseLanguage(baseJson, keyPathPrefix, selectedString);
             fs.writeFileSync(baseLangPath, JSON.stringify(updated, null, 2));
-            const docText = editor.document.getText();
-            const startOffset = editor.document.offsetAt(selection.start);
-            const inVue = isVueFile(filePath);
-            const inJsx = isJsxFile(filePath);
-            const isTplText = inVue && isVueTemplateTextNode(docText, startOffset);
             const attrCtx = inVue ? getAttributeContext(docText, startOffset) : null;
             const jsxAttrCtx = !inVue && inJsx ? getJsxAttributeContext(docText, startOffset) : null;
-            const paramsObj = params.length > 0 ? `{ ${params.join(', ')} }` : '';
-            const expr = paramsObj ? `t('${fullKeyPath}', ${paramsObj})` : `t('${fullKeyPath}')`;
+            // Generate the t() call expression using advanced result
+            const expr = generateTCallExpression(fullKeyPath, advancedResult);
             await withEdit(editor, (edit) => {
                 if (attrCtx) {
                     const { name, isBound, attrStart, valueStart, valueEnd } = attrCtx;

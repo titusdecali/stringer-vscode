@@ -7,5 +7,5 @@
   "dialog.align.question": "翻訳が整合していません。欠落している翻訳を追加するために \"{0}\" を実行しますか？",
   "common.yes": "はい",
   "common.no": "いいえ",
-  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
+  "msg.select.locales.folder": "i18n ロケールフォルダーを選択してください。IDE の右下にある 🌐Stringer メニューから後で選択することもできます"
 }

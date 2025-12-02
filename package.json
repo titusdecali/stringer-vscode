@@ -2,7 +2,7 @@
   "name": "stringer-helper",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "publisher": "titusdecali",
   "icon": "images/stringerIcon.png",
   "repository": {
@@ -182,6 +182,16 @@
           "type": "string",
           "default": "",
           "description": "Optional absolute path override to .stringer-cli.json when auto-detection fails."
+        },
+        "stringerHelper.advancedConversion.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable advanced detection of dynamic values in strings (template literals, concatenation, etc.)."
+        },
+        "stringerHelper.advancedConversion.preserveExpressions": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When converting dynamic strings, preserve the original expressions in the `t()` call parameters (e.g., `t('key', { price: item.price.toFixed(2) })`)."
         }
       }
     }

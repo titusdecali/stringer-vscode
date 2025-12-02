@@ -7,5 +7,5 @@
   "dialog.align.question": "Sus traducciones no están alineadas. ¿Ejecutar \"{0}\" para agregar traducciones faltantes?",
   "common.yes": "Sí",
   "common.no": "No",
-  "msg.select.locales.folder": "Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE"
+  "msg.select.locales.folder": "Seleccione su carpeta de idiomas i18n. Puede seleccionarla más tarde en el menú 🌐Stringer en la esquina inferior derecha de su IDE"
 }

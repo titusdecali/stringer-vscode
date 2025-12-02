@@ -14,7 +14,7 @@
 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=titusdecali.stringer-helper">Install Extension</a> · 
-  <a href="https://docs.stringer-cli.com">Documentation</a> · 
+  <a href="https://docs.stringer-cli.com/vscode-extension">Documentation</a> · 
   <a href="https://discord.gg/hSfeCkej4y">Discord</a>
 </p>
 
