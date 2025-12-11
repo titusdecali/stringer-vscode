@@ -2,7 +2,7 @@
   "name": "stringer-helper",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "1.1.2",
+  "version": "1.1.7",
   "publisher": "titusdecali",
   "icon": "images/stringerIcon.png",
   "repository": {
@@ -192,6 +192,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "When converting dynamic strings, preserve the original expressions in the `t()` call parameters (e.g., `t('key', { price: item.price.toFixed(2) })`)."
+        },
+        "stringerHelper.enableDebugLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug logging to the 'Stringer Helper Debug' output channel. Useful for troubleshooting locale detection issues."
         }
       }
     }
@@ -205,5 +210,6 @@
     "@types/node": "^20.11.30",
     "@types/vscode": "^1.80.0",
     "typescript": "^5.4.5"
-  }
+  },
+  "packageManager": "pnpm@10.22.0+sha512.bf049efe995b28f527fd2b41ae0474ce29186f7edcb3bf545087bd61fbbebb2bf75362d1307fda09c2d288e1e499787ac12d4fcb617a974718a6051f2eee741c"
 }

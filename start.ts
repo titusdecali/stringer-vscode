@@ -3,6 +3,96 @@ import * as fs from 'fs'
 import * as path from 'path'
 import os from 'os'
 
+// Debug output channel for troubleshooting
+let debugChannel: vscode.OutputChannel | null = null
+function getDebugChannel(): vscode.OutputChannel {
+  if (!debugChannel) {
+    debugChannel = vscode.window.createOutputChannel('Stringer Helper Debug')
+  }
+  return debugChannel
+}
+
+function debugLog(message: string): void {
+  const cfg = vscode.workspace.getConfiguration('stringerHelper')
+  if (cfg.get<boolean>('enableDebugLogging', false)) {
+    getDebugChannel().appendLine(`[${new Date().toISOString()}] ${message}`)
+  }
+}
+
+/**
+ * Normalize a file path for consistent comparison across platforms.
+ * 
+ * Platform-specific behavior:
+ * - Windows (NTFS): Case-insensitive filesystem → normalize to lowercase
+ * - macOS (APFS): Case-insensitive by default, but can be case-sensitive → preserve case
+ *   (Preserving case works for both case-sensitive and case-insensitive macOS setups)
+ * - Linux (ext4): Case-sensitive filesystem → preserve case
+ * - Other Unix-like systems: Preserve case (may be case-sensitive)
+ * 
+ * Features:
+ * - Normalizes path separators (forward/backward slashes)
+ * - Resolves relative path components (., ..)
+ * - Handles UNC paths on Windows (\\server\share)
+ * - Handles drive letters consistently (C: vs c:)
+ * - Handles long paths on Windows (\\?\ prefix)
+ * 
+ * Note: This function is designed for path comparison/caching, not for file system operations.
+ * Use the original path for actual file system access.
+ */
+function normalizePathForComparison(filePath: string): string {
+  if (!filePath) return filePath
+  
+  // Normalize path separators and resolve relative components
+  let normalized = path.normalize(filePath)
+  
+  // Handle platform-specific normalization
+  if (process.platform === 'win32') {
+    // Windows: case-insensitive filesystem (NTFS)
+    // Convert to lowercase for consistent comparison
+    
+    // Handle Windows long path prefix (\\?\)
+    const hasLongPathPrefix = normalized.startsWith('\\\\?\\')
+    if (hasLongPathPrefix) {
+      normalized = normalized.slice(4)
+    }
+    
+    // Handle UNC paths (\\server\share)
+    if (normalized.startsWith('\\\\')) {
+      // UNC path: normalize after the server/share part
+      const parts = normalized.split('\\')
+      if (parts.length >= 3) {
+        const serverShare = parts.slice(0, 3).join('\\').toLowerCase()
+        const rest = parts.slice(3).join('\\').toLowerCase()
+        normalized = serverShare + (rest ? '\\' + rest : '')
+      } else {
+        normalized = normalized.toLowerCase()
+      }
+    } else {
+      normalized = normalized.toLowerCase()
+    }
+    
+    // Normalize drive letters (C: vs c:)
+    if (normalized.length >= 2 && normalized[1] === ':') {
+      normalized = normalized[0].toLowerCase() + ':' + normalized.slice(2)
+    }
+    
+    // Restore long path prefix if it was present
+    if (hasLongPathPrefix) {
+      normalized = '\\\\?\\' + normalized
+    }
+  } else {
+    // Unix-like systems (macOS, Linux, BSD, etc.)
+    // Preserve case to support both case-sensitive and case-insensitive filesystems
+    // path.normalize() already handles separators correctly
+    // Don't use path.resolve() here as it would change relative paths
+    
+    // Ensure consistent separator normalization (though path.normalize should handle this)
+    // This is mainly for documentation/clarity
+  }
+  
+  return normalized
+}
+
 let isProcessingCommand = false
 let activePreviewLanguage: string | null = null
 let projectContext: {
@@ -13,6 +103,361 @@ let projectContext: {
 let localeCache: Record<string, any> = {}
 let localeWatcher: vscode.FileSystemWatcher | null = null
 let cliConfigWatcher: fs.FSWatcher | null = null
+let syncWatcher: vscode.FileSystemWatcher | null = null
+let pendingSyncAlert = false
+
+// ============================================================================
+// PER-PROJECT LOCALE CACHE FOR MONOREPO SUPPORT
+// Each locales folder has its own cache of loaded translations
+// ============================================================================
+
+interface PerProjectContext {
+  localesDir: string
+  baseLanguage: string
+  localeData: Record<string, any> // lang -> translations
+  availableLanguages: string[]
+}
+
+// Map of locales folder path -> project context
+const projectContextCache: Map<string, PerProjectContext> = new Map()
+
+/**
+ * Get or create a project context for a specific locales folder
+ */
+function getOrCreateProjectContext(localesDir: string): PerProjectContext | null {
+  // Normalize path for consistent cache lookup across platforms
+  const normalizedLocalesDir = normalizePathForComparison(localesDir)
+  
+  if (projectContextCache.has(normalizedLocalesDir)) {
+    return projectContextCache.get(normalizedLocalesDir)!
+  }
+  
+  // Check if folder exists and has locale files (use original path for file system access)
+  if (!containsLocaleFiles(localesDir)) {
+    return null
+  }
+  
+  // Detect base language and available languages
+  let baseLanguage = 'en'
+  let availableLanguages: string[] = []
+  
+  try {
+    const files = fs.readdirSync(localesDir).filter(f => isLocaleFileName(f))
+    availableLanguages = files.map(f => f.replace(/\.json$/, ''))
+    
+    if (availableLanguages.includes('en')) {
+      baseLanguage = 'en'
+    } else if (availableLanguages.length > 0) {
+      baseLanguage = availableLanguages[0]
+    }
+  } catch {
+    return null
+  }
+  
+  const ctx: PerProjectContext = {
+    localesDir, // Store original path for file system operations
+    baseLanguage,
+    localeData: {},
+    availableLanguages
+  }
+  
+  // Cache using normalized path for consistent lookups
+  projectContextCache.set(normalizedLocalesDir, ctx)
+  return ctx
+}
+
+/**
+ * Load a locale file for a specific project context
+ */
+function loadLocaleForProject(ctx: PerProjectContext, lang: string): Record<string, any> | null {
+  if (ctx.localeData[lang]) {
+    return ctx.localeData[lang]
+  }
+  
+  const tryVariants = (l: string): string[] => {
+    const variants = new Set<string>()
+    const low = l.toLowerCase()
+    const dash = low.replace(/_/g, '-')
+    variants.add(l)
+    variants.add(low)
+    variants.add(dash)
+    if (dash.includes('-')) variants.add(dash.split('-')[0])
+    return Array.from(variants)
+  }
+  
+  const variants = tryVariants(lang)
+  debugLog(`loadLocaleForProject: loading ${lang} from ${ctx.localesDir}, trying variants: ${variants.join(', ')}`)
+  
+  for (const variant of variants) {
+    const filePath = path.join(ctx.localesDir, `${variant}.json`)
+    debugLog(`loadLocaleForProject: trying ${filePath}`)
+    try {
+      if (fs.existsSync(filePath)) {
+        debugLog(`loadLocaleForProject: file exists, reading...`)
+        const content = fs.readFileSync(filePath, 'utf-8')
+        // Strip BOM for Windows compatibility
+        const data = JSON.parse(stripBOM(content))
+        ctx.localeData[lang] = data
+        debugLog(`loadLocaleForProject: successfully loaded ${filePath}, keys: ${Object.keys(data).slice(0, 5).join(', ')}...`)
+        return data
+      } else {
+        debugLog(`loadLocaleForProject: file does not exist: ${filePath}`)
+      }
+    } catch (e) {
+      debugLog(`loadLocaleForProject: error loading ${filePath}: ${e}`)
+      // Continue to next variant
+    }
+  }
+  
+  debugLog(`loadLocaleForProject: no locale file found for ${lang}`)
+  return null
+}
+
+/**
+ * Get translation for a key from a specific project context
+ */
+function getTranslationForProject(ctx: PerProjectContext, keyPath: string, preferredLang?: string): string | null {
+  const lang = preferredLang || activePreviewLanguage || ctx.baseLanguage
+  
+  // Load locale if not already loaded
+  loadLocaleForProject(ctx, lang)
+  if (lang !== ctx.baseLanguage) {
+    loadLocaleForProject(ctx, ctx.baseLanguage)
+  }
+  
+  // Try direct match in preferred language
+  const langData = ctx.localeData[lang]
+  if (langData) {
+    const value = getValueByPathLoose(langData, keyPath)
+    if (value) return value
+  }
+  
+  // Fallback to base language
+  const baseData = ctx.localeData[ctx.baseLanguage]
+  if (baseData) {
+    return getValueByPathLoose(baseData, keyPath)
+  }
+  
+  return null
+}
+
+/**
+ * Get value by path with loose matching (handles numeric leaf keys)
+ */
+function getValueByPathLoose(obj: any, keyPath: string): any {
+  if (!obj) return undefined
+  const parts = keyPath.split('.').filter(Boolean)
+  let node = obj
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]
+    if (node && typeof node === 'object' && part in node) {
+      node = node[part]
+      continue
+    }
+    // If this is the last part and the parent is an object with a single 4-digit key, return that
+    // BUT: only do this fallback if the requested key is NOT itself a 4-digit number
+    // (if user explicitly requests a specific 4-digit key that doesn't exist, return undefined)
+    const isLast = i === parts.length - 1
+    const isRequestingSpecific4Digit = /^\d{4}$/.test(part)
+    if (isLast && node && typeof node === 'object' && !isRequestingSpecific4Digit) {
+      const leafKeys = Object.keys(node)
+      const four = leafKeys.find((k) => /^\d{4}$/.test(k) && typeof node[k] === 'string')
+      if (four) return node[four]
+    }
+    return undefined
+  }
+  return typeof node === 'string' ? node : undefined
+}
+
+/**
+ * Clear all project context caches
+ */
+function clearAllProjectContextCaches(): void {
+  projectContextCache.clear()
+  localesFolderCache.clear()
+}
+
+/**
+ * Get the project context for a specific file, using nearest locales folder
+ */
+function getProjectContextForFile(filePath: string, workspaceRoot?: string): PerProjectContext | null {
+  // First, try to find from workspace root directly (most reliable for multi-root workspaces)
+  if (workspaceRoot) {
+    const wsLocales = findLocalesFolderForWorkspace(workspaceRoot)
+    if (wsLocales) {
+      return getOrCreateProjectContext(wsLocales)
+    }
+  }
+  
+  // Fallback: search from file location up the tree
+  const localesDir = findNearestLocalesFolder(filePath, workspaceRoot)
+  if (!localesDir) return null
+  return getOrCreateProjectContext(localesDir)
+}
+
+// ============================================================================
+// SYNC TRACKING UTILITIES
+// Mirrors the CLI's sync tracking for detecting base language changes
+// ============================================================================
+
+const SYNC_FILE_NAME = '.stringer-sync.json'
+
+interface SyncData {
+  schemaVersion: number
+  baseLanguage: string
+  lastSync: string
+  keys: Record<string, string>
+}
+
+interface SyncStatus {
+  inSync: boolean
+  modifiedKeys: string[]
+  newKeys: string[]
+  removedKeys: string[]
+}
+
+/**
+ * Generate a fast hash using djb2 algorithm (same as CLI)
+ */
+function generateKeyHash(value: string): string {
+  if (typeof value !== 'string') {
+    value = JSON.stringify(value)
+  }
+  let hash = 5381
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 33) ^ value.charCodeAt(i)
+  }
+  const unsignedHash = hash >>> 0
+  return unsignedHash.toString(16).padStart(8, '0')
+}
+
+/**
+ * Flatten nested object into dot-notated paths with values
+ */
+function flattenLocale(
+  obj: Record<string, any>,
+  parentKey = ''
+): Array<{ key: string; value: string }> {
+  const result: Array<{ key: string; value: string }> = []
+  for (const [key, value] of Object.entries(obj)) {
+    const currentKey = parentKey ? `${parentKey}.${key}` : key
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      result.push(...flattenLocale(value, currentKey))
+    } else {
+      const stringValue = typeof value === 'string' ? value : JSON.stringify(value)
+      result.push({ key: currentKey, value: stringValue })
+    }
+  }
+  return result
+}
+
+/**
+ * Flatten and hash all keys in a locale object
+ */
+function flattenAndHashLocale(localeObj: Record<string, any>): Record<string, string> {
+  const flattened = flattenLocale(localeObj)
+  const hashes: Record<string, string> = {}
+  for (const { key, value } of flattened) {
+    hashes[key] = generateKeyHash(value)
+  }
+  return hashes
+}
+
+/**
+ * Load sync file from locales directory
+ */
+function loadSyncFile(localesDir: string): SyncData | null {
+  const syncFilePath = path.join(localesDir, SYNC_FILE_NAME)
+  try {
+    if (!fs.existsSync(syncFilePath)) {
+      return null
+    }
+    const content = fs.readFileSync(syncFilePath, 'utf-8')
+    // Strip BOM for Windows compatibility
+    return JSON.parse(stripBOM(content)) as SyncData
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Detect changes between current and stored hashes
+ */
+function detectSyncChanges(
+  currentHashes: Record<string, string>,
+  storedHashes: Record<string, string>
+): SyncStatus {
+  const modifiedKeys: string[] = []
+  const newKeys: string[] = []
+  const removedKeys: string[] = []
+
+  const currentKeySet = new Set(Object.keys(currentHashes))
+  const storedKeySet = new Set(Object.keys(storedHashes))
+
+  for (const key of currentKeySet) {
+    if (storedKeySet.has(key)) {
+      if (currentHashes[key] !== storedHashes[key]) {
+        modifiedKeys.push(key)
+      }
+    } else {
+      newKeys.push(key)
+    }
+  }
+
+  for (const key of storedKeySet) {
+    if (!currentKeySet.has(key)) {
+      removedKeys.push(key)
+    }
+  }
+
+  const inSync = modifiedKeys.length === 0 && newKeys.length === 0 && removedKeys.length === 0
+
+  return { inSync, modifiedKeys, newKeys, removedKeys }
+}
+
+/**
+ * Check sync status by comparing base language file with sync file
+ */
+function checkSyncStatus(localesDir: string, baseLanguage: string): SyncStatus | null {
+  try {
+    const baseFilePath = path.join(localesDir, `${baseLanguage}.json`)
+    if (!fs.existsSync(baseFilePath)) {
+      return null
+    }
+
+    const baseContent = fs.readFileSync(baseFilePath, 'utf-8')
+    // Strip BOM for Windows compatibility
+    const baseLocale = JSON.parse(stripBOM(baseContent))
+    const currentHashes = flattenAndHashLocale(baseLocale)
+
+    const syncData = loadSyncFile(localesDir)
+    if (!syncData) {
+      // No sync file = first run, consider in sync
+      return { inSync: true, modifiedKeys: [], newKeys: [], removedKeys: [] }
+    }
+
+    return detectSyncChanges(currentHashes, syncData.keys)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Get a human-readable summary of sync changes
+ */
+function getSyncChangeSummary(status: SyncStatus): string {
+  const parts: string[] = []
+  if (status.modifiedKeys.length > 0) {
+    parts.push(`${status.modifiedKeys.length} modified`)
+  }
+  if (status.newKeys.length > 0) {
+    parts.push(`${status.newKeys.length} new`)
+  }
+  if (status.removedKeys.length > 0) {
+    parts.push(`${status.removedKeys.length} removed`)
+  }
+  return parts.join(', ') || 'in sync'
+}
 const decorationType = vscode.window.createTextEditorDecorationType({
   after: {
     margin: '0 0 0 0.25em',
@@ -537,7 +982,8 @@ function readAllCliConfigs(): any[] | null {
   try {
     if (!configPath) return null
     const content = fs.readFileSync(configPath, 'utf-8')
-    const parsed = JSON.parse(content)
+    // Strip BOM for Windows compatibility
+    const parsed = JSON.parse(stripBOM(content))
     return Array.isArray(parsed) ? parsed : [parsed]
   } catch (_e) {
     return null
@@ -571,6 +1017,282 @@ function isLocaleFileName(fileName: string): boolean {
   // Start with 2-3 letters, optional region/script separated by '-' or '_',
   // and allow one extra segment for variants. Excludes names like 'package'.
   return /^[a-z]{2,3}([_-][a-zA-Z]{2,4})?([_-][A-Za-z0-9]+)?$/.test(name)
+}
+
+/**
+ * Strip UTF-8 BOM (Byte Order Mark) from string content.
+ * Windows apps often save UTF-8 files with BOM which causes JSON.parse to fail.
+ */
+function stripBOM(content: string): string {
+  // UTF-8 BOM is EF BB BF, which appears as \uFEFF in JavaScript strings
+  if (content.charCodeAt(0) === 0xFEFF) {
+    return content.slice(1)
+  }
+  return content
+}
+
+// ============================================================================
+// SMART LOCALES FOLDER DETECTION
+// Finds the actual locales folder even if user selects a parent directory
+// ============================================================================
+
+// Common folder names that contain locale files
+const LOCALE_FOLDER_NAMES = [
+  'locales',
+  'locale',
+  'lang',
+  'langs',
+  'languages',
+  'i18n',
+  'translations',
+  'messages'
+]
+
+// Common nested patterns to check (order matters - more specific first)
+const LOCALE_FOLDER_PATTERNS = [
+  // Direct folders
+  'locales',
+  'locale',
+  'lang',
+  'langs',
+  'languages',
+  'translations',
+  'messages',
+  // i18n subfolders
+  'i18n/locales',
+  'i18n/locale',
+  'i18n/lang',
+  'i18n/messages',
+  // src subfolders
+  'src/locales',
+  'src/locale',
+  'src/i18n',
+  'src/i18n/locales',
+  'src/lang',
+  'src/languages',
+  // app subfolders (common in Nuxt, Next, etc.)
+  'app/locales',
+  'app/i18n',
+  'app/i18n/locales',
+  'app/lang',
+  // public/assets
+  'public/locales',
+  'public/lang',
+  'assets/locales',
+  'assets/i18n',
+  'assets/lang',
+  // Other common patterns
+  'resources/lang',
+  'resources/locales',
+  'config/locales',
+  'lib/locales'
+]
+
+/**
+ * Check if a directory contains locale JSON files
+ */
+function containsLocaleFiles(dirPath: string): boolean {
+  try {
+    // Ensure absolute path for consistent checks
+    const checkPath = path.isAbsolute(dirPath) ? dirPath : path.resolve(dirPath)
+    
+    if (!fs.existsSync(checkPath)) {
+      return false
+    }
+    if (!fs.statSync(checkPath).isDirectory()) {
+      return false
+    }
+    const files = fs.readdirSync(checkPath)
+    const localeFiles = files.filter(f => isLocaleFileName(f))
+    if (localeFiles.length > 0) {
+      debugLog(`containsLocaleFiles: ${checkPath} has ${localeFiles.length} locale files: ${localeFiles.join(', ')}`)
+    }
+    return localeFiles.length >= 1 // At least 1 locale file
+  } catch (e) {
+    return false
+  }
+}
+
+/**
+ * Check known locale patterns at a single directory level (no recursion into children).
+ * This is a focused check - only looks at the directory itself and known patterns.
+ */
+function checkLocalePatterns(dir: string): string | null {
+  const searchDir = path.isAbsolute(dir) ? dir : path.resolve(dir)
+  
+  // 1. Check if this directory itself contains locale files
+  if (containsLocaleFiles(searchDir)) {
+    debugLog(`checkLocalePatterns: found locale files directly in ${searchDir}`)
+    return searchDir
+  }
+
+  // 2. Check known patterns as direct children (NO recursive descent)
+  for (const pattern of LOCALE_FOLDER_PATTERNS) {
+    const candidate = path.join(searchDir, pattern)
+    if (containsLocaleFiles(candidate)) {
+      debugLog(`checkLocalePatterns: found locale files at pattern ${pattern}: ${candidate}`)
+      return candidate
+    }
+  }
+
+  return null
+}
+
+/**
+ * Find the locales folder by walking UP from a file toward the workspace root.
+ * Only checks known patterns at each level - does NOT recursively search into all subdirectories.
+ * 
+ * @param filePath - The file being edited
+ * @param workspaceRoot - The workspace root (search stops here)
+ */
+function findLocalesFolderFromFile(filePath: string, workspaceRoot: string): string | null {
+  const absoluteFilePath = path.isAbsolute(filePath) ? filePath : path.resolve(filePath)
+  const absoluteWorkspaceRoot = path.isAbsolute(workspaceRoot) ? workspaceRoot : path.resolve(workspaceRoot)
+  
+  debugLog(`findLocalesFolderFromFile: starting from file=${absoluteFilePath}`)
+  debugLog(`findLocalesFolderFromFile: workspace root=${absoluteWorkspaceRoot}`)
+  
+  let currentDir = path.dirname(absoluteFilePath)
+  let iterations = 0
+  const maxIterations = 20 // Safety limit
+  
+  // Walk UP from the file's directory toward the workspace root
+  while (currentDir && iterations < maxIterations) {
+    iterations++
+    debugLog(`findLocalesFolderFromFile: checking level ${iterations}: ${currentDir}`)
+    
+    // Check known locale patterns at this level
+    const found = checkLocalePatterns(currentDir)
+    if (found) {
+      debugLog(`findLocalesFolderFromFile: found locales at ${found}`)
+      return found
+    }
+    
+    // Stop if we've reached or passed the workspace root
+    const normalizedCurrent = normalizePathForComparison(currentDir)
+    const normalizedRoot = normalizePathForComparison(absoluteWorkspaceRoot)
+    if (normalizedCurrent === normalizedRoot || 
+        !normalizedCurrent.startsWith(normalizedRoot + path.sep) && normalizedCurrent !== normalizedRoot) {
+      debugLog(`findLocalesFolderFromFile: reached workspace root, stopping`)
+      break
+    }
+    
+    // Move up one directory
+    const parent = path.dirname(currentDir)
+    if (parent === currentDir) {
+      debugLog(`findLocalesFolderFromFile: reached filesystem root, stopping`)
+      break
+    }
+    currentDir = parent
+  }
+  
+  // Final check: check the workspace root itself
+  const rootFound = checkLocalePatterns(absoluteWorkspaceRoot)
+  if (rootFound) {
+    debugLog(`findLocalesFolderFromFile: found locales at workspace root: ${rootFound}`)
+    return rootFound
+  }
+  
+  debugLog(`findLocalesFolderFromFile: no locales folder found`)
+  return null
+}
+
+/**
+ * Legacy function for backward compatibility - uses the new focused search.
+ */
+function findLocalesFolder(startDir: string, _maxDepth: number = 2): string | null {
+  // Just check patterns at this directory - no recursive search
+  return checkLocalePatterns(startDir)
+}
+
+/**
+ * Given a selected folder, find the best locales folder.
+ * Returns the selected folder if it contains locale files,
+ * otherwise searches for a suitable child folder.
+ */
+function resolveLocalesFolder(selectedFolder: string): string {
+  const found = findLocalesFolder(selectedFolder, 3)
+  return found || selectedFolder
+}
+
+// ============================================================================
+// MULTI-PROJECT / MONOREPO SUPPORT
+// Finds the nearest locales folder relative to a given file
+// ============================================================================
+
+// Cache of discovered locales folders per workspace root
+const localesFolderCache: Map<string, string | null> = new Map()
+
+/**
+ * Find the nearest locales folder for a given file by walking up the directory tree.
+ * Uses a cache keyed by workspace root to avoid repeated file system lookups.
+ * IMPORTANT: Only walks UP from the file, never searches into unrelated directories.
+ */
+function findNearestLocalesFolder(filePath: string, workspaceRoot?: string): string | null {
+  debugLog(`findNearestLocalesFolder: filePath=${filePath}, workspaceRoot=${workspaceRoot}`)
+  
+  // Need workspace root to properly bound the search
+  if (!workspaceRoot) {
+    debugLog(`findNearestLocalesFolder: no workspace root provided, cannot search`)
+    return null
+  }
+  
+  // Normalize workspace root for cache lookup (Windows case-insensitive)
+  const normalizedWorkspaceRoot = normalizePathForComparison(workspaceRoot)
+  
+  // Check cache first
+  if (localesFolderCache.has(normalizedWorkspaceRoot)) {
+    const cached = localesFolderCache.get(normalizedWorkspaceRoot) || null
+    debugLog(`findNearestLocalesFolder: returning cached value: ${cached}`)
+    return cached
+  }
+  
+  // Use the focused search that walks UP from file to workspace root
+  const found = findLocalesFolderFromFile(filePath, workspaceRoot)
+  
+  // Cache the result (including null to avoid repeated searches)
+  if (found) {
+    localesFolderCache.set(normalizedWorkspaceRoot, found)
+  }
+  
+  return found
+}
+
+/**
+ * Find locales folder specifically for a workspace root.
+ * Only checks known patterns at the workspace root - does NOT search into all subdirectories.
+ */
+function findLocalesFolderForWorkspace(workspaceRoot: string): string | null {
+  debugLog(`findLocalesFolderForWorkspace: workspaceRoot=${workspaceRoot}`)
+  // Normalize workspace root for cache lookup (Windows case-insensitive)
+  const normalizedWorkspaceRoot = normalizePathForComparison(workspaceRoot)
+  
+  // Check cache first
+  const cached = localesFolderCache.get(normalizedWorkspaceRoot)
+  if (cached) {
+    debugLog(`findLocalesFolderForWorkspace: returning cached value: ${cached}`)
+    return cached
+  }
+  
+  // Only check known patterns at workspace root - no recursive descent
+  const found = checkLocalePatterns(workspaceRoot)
+  
+  // Cache positive results
+  if (found) {
+    localesFolderCache.set(normalizedWorkspaceRoot, found)
+    debugLog(`findLocalesFolderForWorkspace: found and cached: ${found}`)
+  } else {
+    debugLog(`findLocalesFolderForWorkspace: no locales found at workspace root`)
+  }
+  
+  return found
+}
+
+/**
+ * Clear the locales folder cache (useful when user changes settings)
+ */
+function clearLocalesFolderCache(): void {
+  localesFolderCache.clear()
 }
 
 async function loadCliProjectConfig(projectRoot: string): Promise<any | null> {
@@ -1046,9 +1768,15 @@ export async function activate(context: vscode.ExtensionContext) {
     const ed = editor ?? vscode.window.activeTextEditor
     if (!ed) return false
     const workspaceFolders = vscode.workspace.workspaceFolders
+    debugLog(`ensureProjectContext: CWD=${process.cwd()}`)
+    debugLog(`ensureProjectContext: workspaceFolders=${workspaceFolders?.map(f => f.uri.fsPath).join(', ') || 'none'}`)
     const folder = vscode.workspace.getWorkspaceFolder(ed.document.uri) || (workspaceFolders && workspaceFolders[0])
-    if (!folder) return false
+    if (!folder) {
+      debugLog(`ensureProjectContext: no workspace folder found`)
+      return false
+    }
     const projectRoot = folder.uri.fsPath
+    debugLog(`ensureProjectContext: projectRoot=${projectRoot}`)
     const config = await loadCliProjectConfig(projectRoot)
 
     // Always rely on a user-selected locales folder (persisted per workspace)
@@ -1062,40 +1790,33 @@ export async function activate(context: vscode.ExtensionContext) {
     } catch {}
 
       if (!localesDir) {
-        // Optional convenience: propose a default folder if it exists
-        let defaultUri: vscode.Uri | undefined = folder.uri
-        try {
-          const candidate = path.resolve(projectRoot, config?.outputDir || path.join('i18n', 'locales'))
-          if (fs.existsSync(candidate)) defaultUri = vscode.Uri.file(candidate)
-        } catch {}
-          const choice = await vscode.window.showInformationMessage(
-            vscode.l10n.t(
-              'Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE'
-            ),
-          'Select Folder',
-          'Later'
-        )
-        if (choice !== 'Select Folder') return false
-        const pick = await vscode.window.showOpenDialog({
-          canSelectFolders: true,
-          canSelectFiles: false,
-          canSelectMany: false,
-          title: vscode.l10n.t('Select your locales folder (contains *.json locale files)'),
-          defaultUri
-        })
-        if (!pick || pick.length === 0) return false
-        localesDir = pick[0].fsPath
-        try { await context.workspaceState.update(stateKey, localesDir) } catch {}
+        // Try auto-detection: search UP from active file toward workspace root
+        debugLog(`ensureProjectContext: auto-detecting locales folder from file ${ed.document.uri.fsPath}`)
+        const autoDetected = findLocalesFolderFromFile(ed.document.uri.fsPath, projectRoot)
+        if (autoDetected) {
+          localesDir = autoDetected
+          debugLog(`ensureProjectContext: auto-detected locales folder: ${localesDir}`)
+          try { await context.workspaceState.update(stateKey, localesDir) } catch {}
+        } else {
+          // No locales folder found - user can manually select via the 🌐Stringer menu
+          debugLog(`ensureProjectContext: no locales folder found, returning false`)
+          return false
+        }
       }
 
     // Infer base language from files if possible
     try {
       const files = fs.readdirSync(localesDir).filter((f) => isLocaleFileName(f))
+      debugLog(`ensureProjectContext: locale files in ${localesDir}: ${files.join(', ')}`)
       if (files.includes('en.json')) baseLanguage = 'en'
       else if (files.length > 0) baseLanguage = files[0].replace(/\.json$/, '')
-    } catch {}
+      debugLog(`ensureProjectContext: detected baseLanguage: ${baseLanguage}`)
+    } catch (e) {
+      debugLog(`ensureProjectContext: error reading locale files: ${e}`)
+    }
 
     projectContext = { projectRoot, localesDir: localesDir!, baseLanguage }
+    debugLog(`ensureProjectContext: set projectContext = { projectRoot: ${projectRoot}, localesDir: ${localesDir}, baseLanguage: ${baseLanguage} }`)
 
     // Initialize preview language from settings or base language
     const extConfig = vscode.workspace.getConfiguration('stringerHelper')
@@ -1123,6 +1844,8 @@ export async function activate(context: vscode.ExtensionContext) {
       localeWatcher = vscode.workspace.createFileSystemWatcher(pattern)
       const reload = async () => {
         localeCache = {}
+        // Also clear per-project caches for monorepo support
+        clearAllProjectContextCaches()
         await preloadLocales()
         refreshActiveEditorDecorations()
       }
@@ -1130,6 +1853,54 @@ export async function activate(context: vscode.ExtensionContext) {
       localeWatcher.onDidCreate(reload)
       localeWatcher.onDidDelete(reload)
       context.subscriptions.push(localeWatcher)
+    } catch {}
+
+    // Setup sync watcher to detect base language changes
+    if (syncWatcher) {
+      syncWatcher.dispose()
+      syncWatcher = null
+    }
+    try {
+      const baseLangPattern = new vscode.RelativePattern(localesDir, `${baseLanguage}.json`)
+      syncWatcher = vscode.workspace.createFileSystemWatcher(baseLangPattern)
+      
+      const checkAndNotifySync = async () => {
+        if (!projectContext) return
+        const status = checkSyncStatus(projectContext.localesDir, projectContext.baseLanguage)
+        if (status && !status.inSync && !pendingSyncAlert) {
+          pendingSyncAlert = true
+          const summary = getSyncChangeSummary(status)
+          const alignNow = vscode.l10n.t('Align Now')
+          const remindLater = vscode.l10n.t('Remind Later')
+          
+          const choice = await vscode.window.showInformationMessage(
+            vscode.l10n.t(
+              'Stringer: Your base language file has changed ({0}). Run Align to update translations.',
+              summary
+            ),
+            alignNow,
+            remindLater
+          )
+          
+          if (choice === alignNow) {
+            const workspaceFolders = vscode.workspace.workspaceFolders
+            const folder = vscode.window.activeTextEditor
+              ? vscode.workspace.getWorkspaceFolder(vscode.window.activeTextEditor.document.uri)
+              : (workspaceFolders && workspaceFolders[0])
+            if (folder) {
+              await runAlignInTerminal(folder.uri.fsPath)
+            }
+          }
+          
+          // Reset pending alert after user responds or after a delay
+          setTimeout(() => {
+            pendingSyncAlert = false
+          }, 60000) // Don't re-alert for 1 minute
+        }
+      }
+      
+      syncWatcher.onDidChange(checkAndNotifySync)
+      context.subscriptions.push(syncWatcher)
     } catch {}
 
     await preloadLocales()
@@ -1170,8 +1941,11 @@ export async function activate(context: vscode.ExtensionContext) {
         continue
       }
       // If this is the last part and the parent is an object with a single 4-digit key, return that
+      // BUT: only do this fallback if the requested key is NOT itself a 4-digit number
+      // (if user explicitly requests a specific 4-digit key that doesn't exist, return undefined)
       const isLast = i === parts.length - 1
-      if (isLast && node && typeof node === 'object') {
+      const isRequestingSpecific4Digit = /^\d{4}$/.test(part)
+      if (isLast && node && typeof node === 'object' && !isRequestingSpecific4Digit) {
         const leafKeys = Object.keys(node)
         const four = leafKeys.find((k) => /^\d{4}$/.test(k) && typeof node[k] === 'string')
         if (four) return node[four]
@@ -1199,7 +1973,8 @@ export async function activate(context: vscode.ExtensionContext) {
       for (const fp of tryPaths) {
         try {
           const txt = await fs.promises.readFile(fp, 'utf-8')
-          const json = JSON.parse(txt)
+          // Strip BOM for Windows compatibility
+          const json = JSON.parse(stripBOM(txt))
           localeCache[lang] = json
           return json
         } catch {}
@@ -1341,8 +2116,70 @@ export async function activate(context: vscode.ExtensionContext) {
     const filePath = editor.document.uri.fsPath
     const isVue = isVueFile(filePath)
     const isJsx = isJsxFile(filePath)
+    
+    // Get workspace folder for this file
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri)
+    const workspaceRoot = workspaceFolder?.uri.fsPath
+    
+    debugLog(`decorateEditor: file=${filePath}`)
+    debugLog(`decorateEditor: workspaceRoot=${workspaceRoot}`)
+    debugLog(`decorateEditor: projectContext=${projectContext ? `localesDir=${projectContext.localesDir}, baseLanguage=${projectContext.baseLanguage}` : 'null'}`)
+    
+    // Try to get per-file project context (monorepo support)
+    const fileCtx = getProjectContextForFile(filePath, workspaceRoot)
+    debugLog(`decorateEditor: fileCtx=${fileCtx ? `localesDir=${fileCtx.localesDir}, baseLanguage=${fileCtx.baseLanguage}` : 'null'}`)
+    
+    // Only fall back to global projectContext if:
+    // 1. Per-file detection failed, AND
+    // 2. The file is in the same workspace as the global context
+    // This prevents showing wrong translations in multi-root workspaces
+    let effectiveCtx = fileCtx
+    if (!effectiveCtx && projectContext) {
+      const globalRoot = projectContext.projectRoot
+      // Normalize paths for cross-platform comparison (Windows case-insensitive)
+      const normalizedWorkspaceRoot = workspaceRoot ? normalizePathForComparison(workspaceRoot) : undefined
+      const normalizedGlobalRoot = normalizePathForComparison(globalRoot)
+      const normalizedFilePath = normalizePathForComparison(filePath)
+      
+      // Ensure paths don't have trailing separators for consistent comparison
+      const trimSep = (p: string) => p.replace(/[/\\]+$/, '')
+      const trimmedGlobalRoot = trimSep(normalizedGlobalRoot)
+      const trimmedFilePath = trimSep(normalizedFilePath)
+      const trimmedWorkspaceRoot = normalizedWorkspaceRoot ? trimSep(normalizedWorkspaceRoot) : undefined
+      
+      // Check if file is in the same project:
+      // 1. Workspace roots match exactly, OR
+      // 2. File path starts with the project root + separator (file is inside project)
+      // 3. File path equals project root (edge case)
+      const isInSameProject = 
+        (trimmedWorkspaceRoot && trimmedWorkspaceRoot === trimmedGlobalRoot) || 
+        (trimmedGlobalRoot && (
+          trimmedFilePath === trimmedGlobalRoot ||
+          trimmedFilePath.startsWith(trimmedGlobalRoot + path.sep) ||
+          trimmedFilePath.startsWith(trimmedGlobalRoot + '/')  // Handle mixed separators
+        ))
+      debugLog(`decorateEditor: isInSameProject check: trimmedWorkspaceRoot=${trimmedWorkspaceRoot}, trimmedGlobalRoot=${trimmedGlobalRoot}, trimmedFilePath=${trimmedFilePath}`)
+      if (isInSameProject) {
+        debugLog(`decorateEditor: using global projectContext as effectiveCtx`)
+        effectiveCtx = {
+          localesDir: projectContext.localesDir,
+          baseLanguage: projectContext.baseLanguage,
+          localeData: localeCache,
+          availableLanguages: []
+        }
+      } else {
+        debugLog(`decorateEditor: file not in same project, effectiveCtx remains ${effectiveCtx ? 'set' : 'null'}`)
+      }
+    }
+    
+    debugLog(`decorateEditor: effectiveCtx=${effectiveCtx ? `localesDir=${effectiveCtx.localesDir}` : 'null'}, found ${found.length} t() calls`)
+    
     for (const item of found) {
-      const value = getTranslation(item.key)
+      // Use per-file context for translation lookup
+      const value = effectiveCtx 
+        ? getTranslationForProject(effectiveCtx, item.key)
+        : getTranslation(item.key)
+      debugLog(`decorateEditor: key=${item.key}, value=${value ?? 'NOT FOUND'}`)
       const textToShow = value ?? ''
       const startOffset = editor.document.offsetAt(item.range.start)
       const inVueTemplate = isVue && isVueTemplateTextNode(docText, startOffset)
@@ -1354,16 +2191,28 @@ export async function activate(context: vscode.ExtensionContext) {
       const inGenericScript = (!isVue && !isJsx) || (isJsx && !inJsxUi && !inJsxAttr)
       // Missing is determined against the ACTIVE locale file only (no fallback),
       // so removing a key from the active file turns it red immediately.
-      const lang = (activePreviewLanguage || projectContext?.baseLanguage) as string
-      const activeDirect = projectContext ? getValueByPath(localeCache[lang], item.key) : undefined
+      const lang = (activePreviewLanguage || effectiveCtx?.baseLanguage || projectContext?.baseLanguage) as string
+      // Ensure locale is loaded before checking activeDirect
+      let activeDirect: any = undefined
+      if (effectiveCtx) {
+        // Explicitly load the locale file if not already loaded
+        loadLocaleForProject(effectiveCtx, lang)
+        if (effectiveCtx.localeData[lang]) {
+          activeDirect = getValueByPathLoose(effectiveCtx.localeData[lang], item.key)
+        }
+      } else if (projectContext) {
+        // Use both strict and loose matching for consistency
+        activeDirect = getValueByPath(localeCache[lang], item.key) || getValueByPathLoose(localeCache[lang], item.key)
+      }
       const isMissing = !activeDirect && (inVueTemplate || inJsxUi || inVueAttr || inJsxAttr || inVueScript || inGenericScript)
       // If there is no value to show (and not a missing-key case) and we're not in hidden mode, skip rendering
       if (!textToShow && !isMissing && keyMode !== 'hidden') continue
       // In hidden mode we want to show only the locale value and hide the original code everywhere
-  const hover = new vscode.MarkdownString()
-  if (hoverShowsKey) hover.appendMarkdown(vscode.l10n.t('Key: {0}', `\`${item.key}\``))
-  hover.appendMarkdown('\n\n')
-  hover.appendMarkdown(vscode.l10n.t('Value ({0}): {1}', activePreviewLanguage ?? '', String(value ?? '')))
+      const displayLang = activePreviewLanguage || effectiveCtx?.baseLanguage || ''
+      const hover = new vscode.MarkdownString()
+      if (hoverShowsKey) hover.appendMarkdown(vscode.l10n.t('Key: {0}', `\`${item.key}\``))
+      hover.appendMarkdown('\n\n')
+      hover.appendMarkdown(vscode.l10n.t('Value ({0}): {1}', displayLang, String(value ?? '')))
       const leaf = item.key.split('.').pop() || item.key
       // Key+locale mode should not duplicate the key (code already shows it)
       // Leaf mode shows a compact key prefix; Hidden mode shows only value and hides the code
@@ -1450,13 +2299,24 @@ export async function activate(context: vscode.ExtensionContext) {
   // Provide hover in any file type
   const hoverProvider = vscode.languages.registerHoverProvider({ scheme: 'file' }, {
     provideHover(document, position) {
+      const filePath = document.uri.fsPath
+      const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri)
+      const workspaceRoot = workspaceFolder?.uri.fsPath
+      
+      // Get per-file context for monorepo support
+      const fileCtx = getProjectContextForFile(filePath, workspaceRoot)
+      
       const ranges = findTTupleRanges(document)
       for (const r of ranges) {
         if (r.range.contains(position)) {
-          const value = getTranslation(r.key)
+          // Use per-file context if available, otherwise fall back to global
+          const value = fileCtx 
+            ? getTranslationForProject(fileCtx, r.key)
+            : getTranslation(r.key)
+          const displayLang = activePreviewLanguage || fileCtx?.baseLanguage || ''
           const md = new vscode.MarkdownString()
           md.appendMarkdown(`Key: \`${r.key}\``)
-          if (value) md.appendMarkdown(`\n\nValue (${activePreviewLanguage}): ${value}`)
+          if (value) md.appendMarkdown(`\n\nValue (${displayLang}): ${value}`)
           return new vscode.Hover(md, r.range)
         }
       }
@@ -1466,6 +2326,16 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(hoverProvider)
 
   async function getAvailableLocales(): Promise<string[]> {
+    // Try to get locales from active editor's project first (monorepo support)
+    const editor = vscode.window.activeTextEditor
+    if (editor) {
+      const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri)
+      const fileCtx = getProjectContextForFile(editor.document.uri.fsPath, workspaceFolder?.uri.fsPath)
+      if (fileCtx) {
+        return fileCtx.availableLanguages
+      }
+    }
+    // Fall back to global context
     if (!projectContext) return []
     try {
       return fs
@@ -1478,17 +2348,29 @@ export async function activate(context: vscode.ExtensionContext) {
   }
 
   async function choosePreviewLanguage(): Promise<void> {
-    if (!projectContext) {
+    // Try per-file context first (monorepo support)
+    let localesDir = projectContext?.localesDir
+    const editor = vscode.window.activeTextEditor
+    if (editor) {
+      const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri)
+      const fileCtx = getProjectContextForFile(editor.document.uri.fsPath, workspaceFolder?.uri.fsPath)
+      if (fileCtx) {
+        localesDir = fileCtx.localesDir
+      }
+    }
+    
+    if (!localesDir) {
       const ok = await ensureProjectContext(null)
       if (!ok) {
         await promptOpenWorkspaceFolder()
         return
       }
+      localesDir = projectContext?.localesDir
     }
-    if (!projectContext) return
+    if (!localesDir) return
     const items = await getAvailableLocales()
     if (items.length === 0) {
-      vscode.window.showInformationMessage(vscode.l10n.t('No locale files found in {0}', projectContext.localesDir))
+      vscode.window.showInformationMessage(vscode.l10n.t('No locale files found in {0}', localesDir))
       return
     }
     const pick = await vscode.window.showQuickPick(items, {
@@ -1539,14 +2421,6 @@ export async function activate(context: vscode.ExtensionContext) {
     if (!folder) return
     const projectRoot = folder.uri.fsPath
     const stateKey = `stringer.localesDir.${projectRoot}`
-        const choice = await vscode.window.showInformationMessage(
-          vscode.l10n.t(
-            'Select your i18n locales folder. You can select it later in the 🌐Stringer menu at the bottom right corner of your IDE'
-          ),
-      'Select Folder',
-      'Later'
-    )
-    if (choice !== 'Select Folder') return
     const pick = await vscode.window.showOpenDialog({
       canSelectFolders: true,
       canSelectFiles: false,
@@ -1555,8 +2429,23 @@ export async function activate(context: vscode.ExtensionContext) {
       defaultUri: folder.uri
     })
     if (!pick || pick.length === 0) return
-    const localesDir = pick[0].fsPath
+    
+    // Smart folder resolution: find actual locales folder even if user selects parent
+    const selectedPath = pick[0].fsPath
+    const localesDir = resolveLocalesFolder(selectedPath)
+    
+    // Notify user if we found a better folder
+    if (localesDir !== selectedPath) {
+      vscode.window.showInformationMessage(
+        vscode.l10n.t('Stringer detected locales folder at: {0}', localesDir)
+      )
+    }
+    
     try { await context.workspaceState.update(stateKey, localesDir) } catch {}
+    
+    // Clear the folder cache when user manually selects a folder
+    clearLocalesFolderCache()
+    
     // Reinitialize context and refresh
     await ensureProjectContext(vscode.window.activeTextEditor)
     langStatusItem.text = `$(globe) Lang: ${activePreviewLanguage ?? '—'}`
@@ -1600,6 +2489,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
   const reloadLocalesCmd = vscode.commands.registerCommand('stringer.reloadLocales', async () => {
     localeCache = {}
+    // Clear all per-project caches for monorepo support
+    clearAllProjectContextCaches()
     await ensureProjectContext(vscode.window.activeTextEditor)
     await preloadLocales()
     refreshActiveEditorDecorations()
@@ -1870,7 +2761,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
       let baseJson: Record<string, any> = {}
       try {
-        baseJson = JSON.parse(fs.readFileSync(baseLangPath, 'utf-8'))
+        // Strip BOM for Windows compatibility
+        baseJson = JSON.parse(stripBOM(fs.readFileSync(baseLangPath, 'utf-8')))
       } catch (_e) {
         vscode.window.showErrorMessage(
           vscode.l10n.t(
