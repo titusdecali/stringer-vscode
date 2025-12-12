@@ -1206,6 +1206,69 @@ function findLocalesFolder(startDir: string, _maxDepth: number = 2): string | nu
 }
 
 /**
+ * Find locales folder for an orphan file (opened without a workspace folder).
+ * Walks UP from the file a limited number of levels, and at each level also
+ * checks immediate child directories for locale patterns.
+ * 
+ * @param filePath - The orphan file being edited
+ * @param maxLevelsUp - Maximum levels to walk up from the file (default: 5)
+ */
+function findLocalesFolderForOrphanFile(filePath: string, maxLevelsUp: number = 5): string | null {
+  const absoluteFilePath = path.isAbsolute(filePath) ? filePath : path.resolve(filePath)
+  
+  debugLog(`findLocalesFolderForOrphanFile: starting from file=${absoluteFilePath}, maxLevelsUp=${maxLevelsUp}`)
+  
+  let currentDir = path.dirname(absoluteFilePath)
+  let level = 0
+  
+  while (currentDir && level < maxLevelsUp) {
+    level++
+    debugLog(`findLocalesFolderForOrphanFile: checking level ${level}: ${currentDir}`)
+    
+    // 1. Check known locale patterns at this level
+    const found = checkLocalePatterns(currentDir)
+    if (found) {
+      debugLog(`findLocalesFolderForOrphanFile: found locales at ${found}`)
+      return found
+    }
+    
+    // 2. Check immediate child directories for locale patterns (only 1 level deep)
+    try {
+      const entries = fs.readdirSync(currentDir, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue
+        // Skip node_modules, hidden folders, and common non-project folders
+        if (entry.name.startsWith('.') || 
+            entry.name === 'node_modules' || 
+            entry.name === 'dist' ||
+            entry.name === 'build' ||
+            entry.name === 'coverage') continue
+        
+        const childPath = path.join(currentDir, entry.name)
+        const childFound = checkLocalePatterns(childPath)
+        if (childFound) {
+          debugLog(`findLocalesFolderForOrphanFile: found locales in child ${childFound}`)
+          return childFound
+        }
+      }
+    } catch {
+      // Ignore errors reading directories
+    }
+    
+    // Move up one directory
+    const parent = path.dirname(currentDir)
+    if (parent === currentDir) {
+      debugLog(`findLocalesFolderForOrphanFile: reached filesystem root, stopping`)
+      break
+    }
+    currentDir = parent
+  }
+  
+  debugLog(`findLocalesFolderForOrphanFile: no locales folder found after ${level} levels`)
+  return null
+}
+
+/**
  * Given a selected folder, find the best locales folder.
  * Returns the selected folder if it contains locale files,
  * otherwise searches for a suitable child folder.
@@ -1227,14 +1290,16 @@ const localesFolderCache: Map<string, string | null> = new Map()
  * Find the nearest locales folder for a given file by walking up the directory tree.
  * Uses a cache keyed by workspace root to avoid repeated file system lookups.
  * IMPORTANT: Only walks UP from the file, never searches into unrelated directories.
+ * 
+ * For orphan files (no workspace root), uses a limited upward search with child checking.
  */
 function findNearestLocalesFolder(filePath: string, workspaceRoot?: string): string | null {
   debugLog(`findNearestLocalesFolder: filePath=${filePath}, workspaceRoot=${workspaceRoot}`)
   
-  // Need workspace root to properly bound the search
+  // If no workspace root, use orphan file search (limited scope)
   if (!workspaceRoot) {
-    debugLog(`findNearestLocalesFolder: no workspace root provided, cannot search`)
-    return null
+    debugLog(`findNearestLocalesFolder: no workspace root, using orphan file search`)
+    return findLocalesFolderForOrphanFile(filePath, 5)
   }
   
   // Normalize workspace root for cache lookup (Windows case-insensitive)
@@ -1771,10 +1836,29 @@ export async function activate(context: vscode.ExtensionContext) {
     debugLog(`ensureProjectContext: CWD=${process.cwd()}`)
     debugLog(`ensureProjectContext: workspaceFolders=${workspaceFolders?.map(f => f.uri.fsPath).join(', ') || 'none'}`)
     const folder = vscode.workspace.getWorkspaceFolder(ed.document.uri) || (workspaceFolders && workspaceFolders[0])
+    
+    // Handle orphan file case (no workspace folder)
     if (!folder) {
-      debugLog(`ensureProjectContext: no workspace folder found`)
+      debugLog(`ensureProjectContext: no workspace folder found, trying orphan file search`)
+      const orphanLocales = findLocalesFolderForOrphanFile(ed.document.uri.fsPath, 5)
+      if (orphanLocales) {
+        debugLog(`ensureProjectContext: found locales for orphan file: ${orphanLocales}`)
+        const orphanRoot = path.dirname(orphanLocales)
+        let baseLanguage = 'en'
+        try {
+          const files = fs.readdirSync(orphanLocales).filter((f) => isLocaleFileName(f))
+          if (files.includes('en.json')) baseLanguage = 'en'
+          else if (files.length > 0) baseLanguage = files[0].replace(/\.json$/, '')
+        } catch {}
+        projectContext = { projectRoot: orphanRoot, localesDir: orphanLocales, baseLanguage }
+        activePreviewLanguage = baseLanguage
+        await preloadLocales()
+        return true
+      }
+      debugLog(`ensureProjectContext: no locales found for orphan file`)
       return false
     }
+    
     const projectRoot = folder.uri.fsPath
     debugLog(`ensureProjectContext: projectRoot=${projectRoot}`)
     const config = await loadCliProjectConfig(projectRoot)
@@ -2195,14 +2279,40 @@ export async function activate(context: vscode.ExtensionContext) {
       // Ensure locale is loaded before checking activeDirect
       let activeDirect: any = undefined
       if (effectiveCtx) {
-        // Explicitly load the locale file if not already loaded
-        loadLocaleForProject(effectiveCtx, lang)
-        if (effectiveCtx.localeData[lang]) {
-          activeDirect = getValueByPathLoose(effectiveCtx.localeData[lang], item.key)
+        // Determine the effective "active" language for THIS project.
+        // If global activePreviewLanguage isn't available for this project (common for orphan files),
+        // use the project's base language for missing checks.
+        const missingLang =
+          activePreviewLanguage && effectiveCtx.availableLanguages.includes(activePreviewLanguage)
+            ? activePreviewLanguage
+            : effectiveCtx.baseLanguage
+
+        // Explicitly load the locale file(s) if not already loaded
+        loadLocaleForProject(effectiveCtx, missingLang)
+        if (missingLang !== effectiveCtx.baseLanguage) {
+          loadLocaleForProject(effectiveCtx, effectiveCtx.baseLanguage)
+        }
+
+        const missingLangData = effectiveCtx.localeData[missingLang]
+        if (missingLangData) {
+          activeDirect = getValueByPathLoose(missingLangData, item.key)
+        }
+        // If the project doesn't have the selected language loaded, fall back to base language
+        if (!activeDirect && missingLang !== effectiveCtx.baseLanguage && effectiveCtx.localeData[effectiveCtx.baseLanguage]) {
+          activeDirect = getValueByPathLoose(effectiveCtx.localeData[effectiveCtx.baseLanguage], item.key)
         }
       } else if (projectContext) {
+        // Determine the effective "active" language for the global project context.
+        const missingLang = (activePreviewLanguage && localeCache[activePreviewLanguage])
+          ? activePreviewLanguage
+          : projectContext.baseLanguage
         // Use both strict and loose matching for consistency
-        activeDirect = getValueByPath(localeCache[lang], item.key) || getValueByPathLoose(localeCache[lang], item.key)
+        activeDirect = getValueByPath(localeCache[missingLang], item.key) || getValueByPathLoose(localeCache[missingLang], item.key)
+        if (!activeDirect && missingLang !== projectContext.baseLanguage) {
+          activeDirect =
+            getValueByPath(localeCache[projectContext.baseLanguage], item.key) ||
+            getValueByPathLoose(localeCache[projectContext.baseLanguage], item.key)
+        }
       }
       const isMissing = !activeDirect && (inVueTemplate || inJsxUi || inVueAttr || inJsxAttr || inVueScript || inGenericScript)
       // If there is no value to show (and not a missing-key case) and we're not in hidden mode, skip rendering

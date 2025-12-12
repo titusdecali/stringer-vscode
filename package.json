@@ -2,7 +2,7 @@
   "name": "stringer-helper",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "publisher": "titusdecali",
   "icon": "images/stringerIcon.png",
   "repository": {
@@ -37,6 +37,15 @@
     "onStartupFinished"
   ],
   "main": "./dist/start.js",
+  "files": [
+    "dist/**",
+    "images/**",
+    "l10n/**",
+    "package.json",
+    "package.nls*.json",
+    "README.md",
+    "license.md"
+  ],
   "l10n": {
     "bundle": "./l10n/bundle.l10n.json"
   },
